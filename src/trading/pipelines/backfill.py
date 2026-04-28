@@ -39,7 +39,7 @@ def backfill_flow(
     """
     logger = get_run_logger()
     cfg = cfg or get_pipeline_config()
-    universe = tickers or get_universe_config().tickers
+    universe = tickers or get_universe_config().symbols
     start_date = start or cfg.defaults.backfill_start
     sleep_s = cfg.fetch.request_sleep_seconds
 

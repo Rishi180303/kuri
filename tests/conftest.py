@@ -100,9 +100,9 @@ def universe_yaml(tmp_path: Path) -> Path:
 as_of: "2026-04-27"
 index: "NIFTY 50"
 tickers:
-  - RELIANCE
-  - TCS
-  - INFY
+  - { symbol: RELIANCE, sector: "Oil & Gas" }
+  - { symbol: TCS, sector: "IT" }
+  - { symbol: INFY, sector: "IT" }
 """.strip(),
         encoding="utf-8",
     )

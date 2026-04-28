@@ -107,24 +107,55 @@ class PipelineConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class TickerEntry(BaseModel):
+    symbol: str
+    sector: str
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("symbol")
+    @classmethod
+    def _symbol_nonempty(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("ticker symbol must not be empty")
+        return s
+
+    @field_validator("sector")
+    @classmethod
+    def _sector_nonempty(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("ticker sector must not be empty")
+        return s
+
+
 class UniverseConfig(BaseModel):
     as_of: date
     index: str
-    tickers: list[str]
+    tickers: list[TickerEntry]
 
     model_config = {"extra": "forbid"}
 
     @field_validator("tickers")
     @classmethod
-    def _no_empty_or_dupes(cls, v: list[str]) -> list[str]:
+    def _no_empty_or_dupes(cls, v: list[TickerEntry]) -> list[TickerEntry]:
         if not v:
             raise ValueError("universe.tickers must not be empty")
-        stripped = [t.strip() for t in v]
-        if any(not t for t in stripped):
-            raise ValueError("universe.tickers contains an empty string")
-        if len(set(stripped)) != len(stripped):
-            raise ValueError("universe.tickers contains duplicates")
-        return stripped
+        symbols = [t.symbol for t in v]
+        if len(set(symbols)) != len(symbols):
+            raise ValueError("universe.tickers contains duplicate symbols")
+        return v
+
+    @property
+    def symbols(self) -> list[str]:
+        """Bare symbols (e.g. for fetch loops)."""
+        return [t.symbol for t in self.tickers]
+
+    @property
+    def sector_map(self) -> dict[str, str]:
+        """symbol -> sector. Used by cross-sectional features."""
+        return {t.symbol: t.sector for t in self.tickers}
 
 
 # ---------------------------------------------------------------------------
@@ -188,3 +219,28 @@ def get_pipeline_config() -> PipelineConfig:
 @lru_cache(maxsize=1)
 def get_universe_config() -> UniverseConfig:
     return load_universe_config()
+
+
+# ---------------------------------------------------------------------------
+# Calendar config
+# ---------------------------------------------------------------------------
+
+
+class CalendarConfig(BaseModel):
+    """NSE special/partial trading sessions sourced from configs/calendar.yaml."""
+
+    special_sessions: list[date] = Field(default_factory=list)
+
+    model_config = {"extra": "forbid"}
+
+
+def load_calendar_config(path: Path | None = None) -> CalendarConfig:
+    yaml_path = path or (_configs_dir() / "calendar.yaml")
+    if not yaml_path.exists():
+        return CalendarConfig()
+    return CalendarConfig.model_validate(_load_yaml(yaml_path))
+
+
+@lru_cache(maxsize=1)
+def get_calendar_config() -> CalendarConfig:
+    return load_calendar_config()

@@ -90,6 +90,10 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_decorators = false
+# Polars Series methods (.min/.max/.item) return untyped values; comparing
+# them with floats in test assertions trips strict mypy without aiding
+# correctness. Tests are the right place to relax these.
+disable_error_code = ["operator", "union-attr"]
 
 # ---------------------------------------------------------------------------
 # Pytest

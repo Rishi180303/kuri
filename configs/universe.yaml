@@ -1,4 +1,4 @@
-# NSE Nifty 50 ticker universe.
+# NSE Nifty 50 ticker universe with sector classifications.
 #
 # Snapshot date: 2026-04-28
 # Source: NSE Nifty 50 constituents (https://www.nseindia.com/products-services/indices-nifty50-index)
@@ -9,65 +9,65 @@
 # yfinance requires the ".NS" suffix for NSE-listed equities. The suffix is
 # applied at fetch time, not stored here.
 #
+# Sector taxonomy follows NSE's official classification. Some sectors are
+# singletons (1 ticker only); cross-sectional sector-relative features will
+# emit null for those rather than imputing degenerate zero-variance ranks.
+#
 # KNOWN GAP: TATAMOTORS is excluded for now. Yahoo Finance's data feed for
-# `TATAMOTORS.NS` has been broken since the Oct 2024 demerger (TML split into
-# commercial vehicles + TMPV passenger vehicles). TMPV.NS only has data from
-# Oct 2025 onwards, which isn't enough history for our 2018+ backfill.
-# Revisit when Yahoo fixes the feed, or when we add an NSE-direct fetcher
-# as a fallback source.
+# `TATAMOTORS.NS` has been broken since the Oct 2024 demerger. Revisit when
+# Yahoo fixes the feed, or when we add an NSE-direct fetcher as a fallback.
 
 as_of: "2026-04-28"
 index: "NIFTY 50"
 
 tickers:
-  - ADANIENT
-  - ADANIPORTS
-  - APOLLOHOSP
-  - ASIANPAINT
-  - AXISBANK
-  - BAJAJ-AUTO
-  - BAJFINANCE
-  - BAJAJFINSV
-  - BEL
-  - BHARTIARTL
-  - BPCL
-  - BRITANNIA
-  - CIPLA
-  - COALINDIA
-  - DRREDDY
-  - EICHERMOT
-  - GRASIM
-  - HCLTECH
-  - HDFCBANK
-  - HDFCLIFE
-  - HEROMOTOCO
-  - HINDALCO
-  - HINDUNILVR
-  - ICICIBANK
-  - INDUSINDBK
-  - INFY
-  - ITC
-  - JSWSTEEL
-  - KOTAKBANK
-  - LT
-  - LTIM
-  - M&M
-  - MARUTI
-  - NESTLEIND
-  - NTPC
-  - ONGC
-  - POWERGRID
-  - RELIANCE
-  - SBILIFE
-  - SBIN
-  - SHRIRAMFIN
-  - SUNPHARMA
-  - TATACONSUM
-  # - TATAMOTORS  # excluded: Yahoo data broken post-demerger (see header note)
-  - TATASTEEL
-  - TCS
-  - TECHM
-  - TITAN
-  - TRENT
-  - ULTRACEMCO
-  - WIPRO
+  - { symbol: ADANIENT,    sector: "Diversified" }
+  - { symbol: ADANIPORTS,  sector: "Services" }
+  - { symbol: APOLLOHOSP,  sector: "Healthcare" }
+  - { symbol: ASIANPAINT,  sector: "Consumer Durables" }
+  - { symbol: AXISBANK,    sector: "Financial Services" }
+  - { symbol: BAJAJ-AUTO,  sector: "Automobile" }
+  - { symbol: BAJAJFINSV,  sector: "Financial Services" }
+  - { symbol: BAJFINANCE,  sector: "Financial Services" }
+  - { symbol: BEL,         sector: "Capital Goods" }
+  - { symbol: BHARTIARTL,  sector: "Telecom" }
+  - { symbol: BPCL,        sector: "Oil & Gas" }
+  - { symbol: BRITANNIA,   sector: "Consumer Goods" }
+  - { symbol: CIPLA,       sector: "Healthcare" }
+  - { symbol: COALINDIA,   sector: "Metals & Mining" }
+  - { symbol: DRREDDY,     sector: "Healthcare" }
+  - { symbol: EICHERMOT,   sector: "Automobile" }
+  - { symbol: GRASIM,      sector: "Cement" }
+  - { symbol: HCLTECH,     sector: "IT" }
+  - { symbol: HDFCBANK,    sector: "Financial Services" }
+  - { symbol: HDFCLIFE,    sector: "Financial Services" }
+  - { symbol: HEROMOTOCO,  sector: "Automobile" }
+  - { symbol: HINDALCO,    sector: "Metals & Mining" }
+  - { symbol: HINDUNILVR,  sector: "Consumer Goods" }
+  - { symbol: ICICIBANK,   sector: "Financial Services" }
+  - { symbol: INDUSINDBK,  sector: "Financial Services" }
+  - { symbol: INFY,        sector: "IT" }
+  - { symbol: ITC,         sector: "Consumer Goods" }
+  - { symbol: JSWSTEEL,    sector: "Metals & Mining" }
+  - { symbol: KOTAKBANK,   sector: "Financial Services" }
+  - { symbol: LT,          sector: "Construction" }
+  - { symbol: LTIM,        sector: "IT" }
+  - { symbol: M&M,         sector: "Automobile" }
+  - { symbol: MARUTI,      sector: "Automobile" }
+  - { symbol: NESTLEIND,   sector: "Consumer Goods" }
+  - { symbol: NTPC,        sector: "Power" }
+  - { symbol: ONGC,        sector: "Oil & Gas" }
+  - { symbol: POWERGRID,   sector: "Power" }
+  - { symbol: RELIANCE,    sector: "Oil & Gas" }
+  - { symbol: SBILIFE,     sector: "Financial Services" }
+  - { symbol: SBIN,        sector: "Financial Services" }
+  - { symbol: SHRIRAMFIN,  sector: "Financial Services" }
+  - { symbol: SUNPHARMA,   sector: "Healthcare" }
+  - { symbol: TATACONSUM,  sector: "Consumer Goods" }
+  - { symbol: TATASTEEL,   sector: "Metals & Mining" }
+  - { symbol: TCS,         sector: "IT" }
+  - { symbol: TECHM,       sector: "IT" }
+  - { symbol: TITAN,       sector: "Consumer Durables" }
+  - { symbol: TRENT,       sector: "Consumer Services" }
+  - { symbol: ULTRACEMCO,  sector: "Cement" }
+  - { symbol: WIPRO,       sector: "IT" }

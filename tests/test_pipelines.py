@@ -60,7 +60,7 @@ def test_backfill_flow_writes_each_ticker(tmp_data_dir: Path, monkeypatch: Any) 
         return _fake_pandas_frame("2024-01-02", 4)
 
     # Patch the underlying yfinance call in both the OHLCV and index modules.
-    monkeypatch.setattr("trading.data.ohlcv.yf.download", fake_dl)
+    monkeypatch.setattr("trading.data.fetcher.yf.download", fake_dl)
 
     result = backfill_flow(
         start=date(2024, 1, 1),
@@ -82,7 +82,7 @@ def test_backfill_flow_includes_indices(tmp_data_dir: Path, monkeypatch: Any) ->
     def fake_dl(tickers: str, **_: Any) -> pd.DataFrame:
         return _fake_pandas_frame("2024-01-02", 3)
 
-    monkeypatch.setattr("trading.data.ohlcv.yf.download", fake_dl)
+    monkeypatch.setattr("trading.data.fetcher.yf.download", fake_dl)
 
     result = backfill_flow(
         start=date(2024, 1, 1),
@@ -124,7 +124,7 @@ def test_daily_update_skips_when_current(tmp_data_dir: Path, monkeypatch: Any) -
         called["n"] += 1
         return pd.DataFrame()
 
-    monkeypatch.setattr("trading.data.ohlcv.yf.download", fake_dl)
+    monkeypatch.setattr("trading.data.fetcher.yf.download", fake_dl)
 
     result = daily_update_flow(tickers=["RELIANCE"], include_indices=False, cfg=cfg)
     assert result["RELIANCE"] == 0
@@ -139,7 +139,7 @@ def test_backfill_throttles_between_fetches(tmp_data_dir: Path, monkeypatch: Any
     def fake_dl(tickers: str, **_: Any) -> pd.DataFrame:
         return _fake_pandas_frame("2024-01-02", 1)
 
-    monkeypatch.setattr("trading.data.ohlcv.yf.download", fake_dl)
+    monkeypatch.setattr("trading.data.fetcher.yf.download", fake_dl)
 
     sleeps: list[float] = []
     monkeypatch.setattr("trading.pipelines.backfill._sleep", lambda s: sleeps.append(s))
@@ -162,7 +162,7 @@ def test_backfill_skips_throttle_when_sleep_zero(tmp_data_dir: Path, monkeypatch
     def fake_dl(tickers: str, **_: Any) -> pd.DataFrame:
         return _fake_pandas_frame("2024-01-02", 1)
 
-    monkeypatch.setattr("trading.data.ohlcv.yf.download", fake_dl)
+    monkeypatch.setattr("trading.data.fetcher.yf.download", fake_dl)
     sleeps: list[float] = []
     monkeypatch.setattr("trading.pipelines.backfill._sleep", lambda s: sleeps.append(s))
     backfill_flow(

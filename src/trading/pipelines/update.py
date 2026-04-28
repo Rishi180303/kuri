@@ -31,7 +31,7 @@ def daily_update_flow(
 ) -> dict[str, int]:
     logger = get_run_logger()
     cfg = cfg or get_pipeline_config()
-    universe = tickers or get_universe_config().tickers
+    universe = tickers or get_universe_config().symbols
     today = date.today()
     store = DataStore(cfg.paths.data_dir)
     sleep_s = cfg.fetch.request_sleep_seconds

@@ -27,4 +27,7 @@ def test_load_universe_from_default_yaml() -> None:
     assert cfg.index == "NIFTY 50"
     # Bank tickers we'll smoke-test should always be present
     for must_have in ("RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK"):
-        assert must_have in cfg.tickers
+        assert must_have in cfg.symbols
+    # Sector map covers every symbol with a non-empty value
+    for sym in cfg.symbols:
+        assert cfg.sector_map[sym]

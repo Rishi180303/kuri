@@ -26,3 +26,12 @@ repos:
       - id: check-toml
       - id: check-added-large-files
         args: [--maxkb=1024]
+
+  - repo: local
+    hooks:
+      - id: features-yaml-in-sync
+        name: features.yaml in sync with code
+        entry: uv run kuri features validate-yaml
+        language: system
+        files: ^(src/trading/features/|configs/features\.yaml$)
+        pass_filenames: false

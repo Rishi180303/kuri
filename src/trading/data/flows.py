@@ -40,6 +40,5 @@ class NotImplementedFlowsFetcher:
     def fetch(self, start: date, end: date | None = None) -> pl.DataFrame:
         log.warning("flows.fetch.not_implemented", start=str(start), end=str(end))
         raise NotImplementedError(
-            "FII/DII flow fetching is not yet implemented. "
-            "Wire up a scraper in trading.data.flows."
+            "FII/DII flow fetching is not yet implemented. Wire up a scraper in trading.data.flows."
         )

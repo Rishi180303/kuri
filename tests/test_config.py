@@ -57,13 +57,22 @@ def test_universe_config_loads(universe_yaml: Path) -> None:
     cfg = load_universe_config(universe_yaml)
     assert isinstance(cfg, UniverseConfig)
     assert cfg.as_of == date(2026, 4, 27)
-    assert cfg.tickers == ["RELIANCE", "TCS", "INFY"]
+    assert cfg.symbols == ["RELIANCE", "TCS", "INFY"]
+    assert cfg.sector_map == {
+        "RELIANCE": "Oil & Gas",
+        "TCS": "IT",
+        "INFY": "IT",
+    }
 
 
-def test_universe_rejects_duplicates(tmp_path: Path) -> None:
+def test_universe_rejects_duplicate_symbols(tmp_path: Path) -> None:
     p = tmp_path / "u.yaml"
     p.write_text(
-        'as_of: "2026-04-27"\nindex: "X"\ntickers: ["A", "A"]\n',
+        'as_of: "2026-04-27"\n'
+        'index: "X"\n'
+        "tickers:\n"
+        "  - { symbol: A, sector: Foo }\n"
+        "  - { symbol: A, sector: Bar }\n",
         encoding="utf-8",
     )
     with pytest.raises(ValidationError):
@@ -80,11 +89,29 @@ def test_universe_rejects_empty(tmp_path: Path) -> None:
         load_universe_config(p)
 
 
+def test_universe_rejects_missing_sector(tmp_path: Path) -> None:
+    p = tmp_path / "u.yaml"
+    p.write_text(
+        'as_of: "2026-04-27"\nindex: "X"\ntickers:\n  - { symbol: A }\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError):
+        load_universe_config(p)
+
+
 def test_default_universe_yaml_loads() -> None:
     """The shipped configs/universe.yaml must parse cleanly."""
     cfg = load_universe_config()
     assert len(cfg.tickers) >= 50
-    assert "RELIANCE" in cfg.tickers
+    assert "RELIANCE" in cfg.symbols
+    assert cfg.sector_map["RELIANCE"] == "Oil & Gas"
+    assert cfg.sector_map["TCS"] == "IT"
+    # Singleton sectors are expected (e.g. Telecom = BHARTIARTL only).
+    sector_counts: dict[str, int] = {}
+    for s in cfg.sector_map.values():
+        sector_counts[s] = sector_counts.get(s, 0) + 1
+    assert any(c == 1 for c in sector_counts.values())
+    assert any(c >= 5 for c in sector_counts.values())
 
 
 def test_default_pipeline_yaml_loads() -> None:

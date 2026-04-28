@@ -1,0 +1,14 @@
+# NSE special / partial trading sessions.
+#
+# These are dates where only a subset of stocks traded (Diwali muhurat
+# evening sessions, NSE-declared special sessions, etc.). The Phase 1.5
+# audit found ~95% of zero-volume rows clustered on these three dates.
+#
+# Add new dates here when NSE announces them (e.g. each Diwali muhurat
+# session). No code changes required — calendar.is_special_session()
+# reads from this list.
+
+special_sessions:
+  - 2018-11-07   # Diwali muhurat (Samvat 2075)
+  - 2025-03-18   # special session (intra-day-only window)
+  - 2026-01-15   # Diwali muhurat (Samvat 2083)

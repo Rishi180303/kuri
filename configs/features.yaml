@@ -1,0 +1,461 @@
+feature_set_version: 1
+n_features: 63
+features:
+- name: ret_1d
+  module: price
+  source: per_ticker
+  lookback_days: 2
+  input: adj_close
+  mask_on_special: keep
+  description: Adjusted-close return over 1 bars.
+- name: ret_5d
+  module: price
+  source: per_ticker
+  lookback_days: 6
+  input: adj_close
+  mask_on_special: keep
+  description: Adjusted-close return over 5 bars.
+- name: ret_10d
+  module: price
+  source: per_ticker
+  lookback_days: 11
+  input: adj_close
+  mask_on_special: keep
+  description: Adjusted-close return over 10 bars.
+- name: ret_20d
+  module: price
+  source: per_ticker
+  lookback_days: 21
+  input: adj_close
+  mask_on_special: keep
+  description: Adjusted-close return over 20 bars.
+- name: ret_60d
+  module: price
+  source: per_ticker
+  lookback_days: 61
+  input: adj_close
+  mask_on_special: keep
+  description: Adjusted-close return over 60 bars.
+- name: log_ret_1d
+  module: price
+  source: per_ticker
+  lookback_days: 2
+  input: adj_close
+  mask_on_special: keep
+  description: One-bar log return on adjusted close.
+- name: gap_overnight
+  module: price
+  source: per_ticker
+  lookback_days: 2
+  input: open,close
+  mask_on_special: keep
+  description: Overnight gap (open[t] - close[t-1]) / close[t-1].
+- name: gap_fill_rate
+  module: price
+  source: per_ticker
+  lookback_days: 2
+  input: open,close
+  mask_on_special: keep
+  description: Fraction of the open-vs-prev-close gap that the close filled (sign-aware).
+    Null when gap is ~zero.
+- name: dist_sma_20_pct
+  module: price
+  source: per_ticker
+  lookback_days: 20
+  input: adj_close
+  mask_on_special: keep
+  description: Percentage distance of adj_close from its 20-bar SMA.
+- name: dist_sma_50_pct
+  module: price
+  source: per_ticker
+  lookback_days: 50
+  input: adj_close
+  mask_on_special: keep
+  description: Percentage distance of adj_close from its 50-bar SMA.
+- name: dist_sma_200_pct
+  module: price
+  source: per_ticker
+  lookback_days: 200
+  input: adj_close
+  mask_on_special: keep
+  description: Percentage distance of adj_close from its 200-bar SMA.
+- name: dist_ema_20_pct
+  module: price
+  source: per_ticker
+  lookback_days: 20
+  input: adj_close
+  mask_on_special: keep
+  description: Percentage distance of adj_close from its 20-bar EMA.
+- name: dist_ema_50_pct
+  module: price
+  source: per_ticker
+  lookback_days: 50
+  input: adj_close
+  mask_on_special: keep
+  description: Percentage distance of adj_close from its 50-bar EMA.
+- name: dist_ema_200_pct
+  module: price
+  source: per_ticker
+  lookback_days: 200
+  input: adj_close
+  mask_on_special: keep
+  description: Percentage distance of adj_close from its 200-bar EMA.
+- name: pos_in_52w_range_pct
+  module: price
+  source: per_ticker
+  lookback_days: 252
+  input: adj_close
+  mask_on_special: keep
+  description: Percentile position of adj_close inside its rolling 252-bar high-low
+    range, scaled to 0-100.
+- name: realized_vol_5d
+  module: volatility
+  source: per_ticker
+  lookback_days: 6
+  input: adj_close
+  mask_on_special: keep
+  description: Annualised std of 5-bar adj_close log returns (* sqrt(252)).
+- name: realized_vol_10d
+  module: volatility
+  source: per_ticker
+  lookback_days: 11
+  input: adj_close
+  mask_on_special: keep
+  description: Annualised std of 10-bar adj_close log returns (* sqrt(252)).
+- name: realized_vol_20d
+  module: volatility
+  source: per_ticker
+  lookback_days: 21
+  input: adj_close
+  mask_on_special: keep
+  description: Annualised std of 20-bar adj_close log returns (* sqrt(252)).
+- name: realized_vol_60d
+  module: volatility
+  source: per_ticker
+  lookback_days: 61
+  input: adj_close
+  mask_on_special: keep
+  description: Annualised std of 60-bar adj_close log returns (* sqrt(252)).
+- name: parkinson_vol_20d
+  module: volatility
+  source: per_ticker
+  lookback_days: 20
+  input: high,low
+  mask_on_special: mask
+  description: Parkinson volatility from 20-bar H/L; annualised.
+- name: garman_klass_vol_20d
+  module: volatility
+  source: per_ticker
+  lookback_days: 20
+  input: open,high,low,close
+  mask_on_special: mask
+  description: Garman-Klass volatility from 20-bar OHLC; annualised.
+- name: atr_14
+  module: volatility
+  source: per_ticker
+  lookback_days: 15
+  input: high,low,close
+  mask_on_special: mask
+  description: Average true range, Wilder smoothing, period 14.
+- name: vol_of_vol_20d
+  module: volatility
+  source: per_ticker
+  lookback_days: 40
+  input: adj_close
+  mask_on_special: keep
+  description: Std of realized_vol_20d over a 20-bar window.
+- name: vol_regime
+  module: volatility
+  source: per_ticker
+  lookback_days: 252
+  input: adj_close
+  mask_on_special: keep
+  description: 'Volatility regime: 0=low, 1=mid, 2=high. Bucketed by rolling 252-bar
+    percentile of realized_vol_20d (thresholds at 33/67).'
+- name: macd
+  module: trend
+  source: per_ticker
+  lookback_days: 26
+  input: adj_close
+  mask_on_special: keep
+  description: 'MACD line: EMA(12) - EMA(26).'
+- name: macd_signal
+  module: trend
+  source: per_ticker
+  lookback_days: 35
+  input: adj_close
+  mask_on_special: keep
+  description: 'Signal line: EMA(9) of MACD.'
+- name: macd_hist
+  module: trend
+  source: per_ticker
+  lookback_days: 35
+  input: adj_close
+  mask_on_special: keep
+  description: 'MACD histogram: macd - macd_signal.'
+- name: adx_14
+  module: trend
+  source: per_ticker
+  lookback_days: 28
+  input: high,low,close
+  mask_on_special: keep
+  description: Average Directional Index, Wilder smoothing, period 14.
+- name: aroon_up_25
+  module: trend
+  source: per_ticker
+  lookback_days: 25
+  input: high
+  mask_on_special: keep
+  description: 'Aroon up: 100 * (n - bars-since-high) / n; n=25.'
+- name: aroon_down_25
+  module: trend
+  source: per_ticker
+  lookback_days: 25
+  input: low
+  mask_on_special: keep
+  description: 'Aroon down: 100 * (n - bars-since-low) / n; n=25.'
+- name: heikin_ashi_close_smooth_5
+  module: trend
+  source: per_ticker
+  lookback_days: 5
+  input: open,high,low,close
+  mask_on_special: keep
+  description: EMA(5) of Heikin-Ashi close = (O+H+L+C)/4.
+- name: supertrend_10_3
+  module: trend
+  source: per_ticker
+  lookback_days: 20
+  input: high,low,close
+  mask_on_special: keep
+  description: Supertrend value (price level). HL2 anchor with ATR bands; period=10,
+    multiplier=3.0.
+- name: trend_aligned_5_20_50
+  module: trend
+  source: per_ticker
+  lookback_days: 50
+  input: adj_close
+  mask_on_special: keep
+  description: 1 if adj_close above SMAs of all three windows (5, 20, 50); -1 if below
+    all three; 0 otherwise.
+- name: rsi_14
+  module: momentum
+  source: per_ticker
+  lookback_days: 15
+  input: adj_close
+  mask_on_special: keep
+  description: Wilder RSI over 14 bars on adj_close.
+- name: rsi_21
+  module: momentum
+  source: per_ticker
+  lookback_days: 22
+  input: adj_close
+  mask_on_special: keep
+  description: Wilder RSI over 21 bars on adj_close.
+- name: stoch_k_14
+  module: momentum
+  source: per_ticker
+  lookback_days: 14
+  input: high,low,close
+  mask_on_special: keep
+  description: 'Stochastic %K over 14 bars: 100 * (close - LL) / (HH - LL).'
+- name: stoch_d_3
+  module: momentum
+  source: per_ticker
+  lookback_days: 17
+  input: high,low,close
+  mask_on_special: keep
+  description: 'Stochastic %D: 3-bar SMA of stoch_k.'
+- name: williams_r_14
+  module: momentum
+  source: per_ticker
+  lookback_days: 14
+  input: high,low,close
+  mask_on_special: keep
+  description: 'Williams %R over 14 bars: -100 * (HH - close) / (HH - LL).'
+- name: roc_5d
+  module: momentum
+  source: per_ticker
+  lookback_days: 6
+  input: adj_close
+  mask_on_special: keep
+  description: Rate of change over 5 bars in percent.
+- name: roc_10d
+  module: momentum
+  source: per_ticker
+  lookback_days: 11
+  input: adj_close
+  mask_on_special: keep
+  description: Rate of change over 10 bars in percent.
+- name: roc_20d
+  module: momentum
+  source: per_ticker
+  lookback_days: 21
+  input: adj_close
+  mask_on_special: keep
+  description: Rate of change over 20 bars in percent.
+- name: momentum_div_flag
+  module: momentum
+  source: per_ticker
+  lookback_days: 34
+  input: adj_close
+  mask_on_special: keep
+  description: 'Heuristic divergence flag over 20-bar window: +1 = price 20-bar low
+    without matching RSI low (bullish div), -1 = price 20-bar high without matching
+    RSI high (bearish div), 0 otherwise.'
+- name: vol_ratio_20d
+  module: volume
+  source: per_ticker
+  lookback_days: 20
+  input: volume
+  mask_on_special: mask
+  description: Volume relative to its trailing 20-bar mean.
+- name: obv
+  module: volume
+  source: per_ticker
+  lookback_days: 2
+  input: close,volume
+  mask_on_special: mask
+  description: 'On-Balance Volume cumulative: signed volume by close direction.'
+- name: typical_price_dev_pct
+  module: volume
+  source: per_ticker
+  lookback_days: 1
+  input: high,low,close
+  mask_on_special: mask
+  description: 'Daily proxy for VWAP deviation: (close - typical_price) / typical_price
+    * 100, where typical_price = (H+L+C)/3. Real VWAP needs intraday data; this is
+    the daily-bar proxy.'
+- name: accum_dist_line
+  module: volume
+  source: per_ticker
+  lookback_days: 1
+  input: high,low,close,volume
+  mask_on_special: mask
+  description: 'Accumulation/Distribution Line: cumulative sum of ((C-L) - (H-C))
+    / (H-L) * V.'
+- name: unusual_vol_z_20d
+  module: volume
+  source: per_ticker
+  lookback_days: 20
+  input: volume
+  mask_on_special: mask
+  description: Z-score of volume vs its rolling 20-bar mean and std, after winsorising
+    the rolling distribution at p01/p99 to keep the std stable.
+- name: range_pct_close
+  module: microstructure
+  source: per_ticker
+  lookback_days: 1
+  input: high,low,close
+  mask_on_special: mask
+  description: (high - low) / close * 100. Daily range as a fraction of close.
+- name: range_expansion_20d
+  module: microstructure
+  source: per_ticker
+  lookback_days: 20
+  input: high,low
+  mask_on_special: mask
+  description: Today's H-L range relative to its trailing 20-bar mean. >1 = expansion
+    vs the recent regime.
+- name: close_pos_in_range
+  module: microstructure
+  source: per_ticker
+  lookback_days: 1
+  input: high,low,close
+  mask_on_special: mask
+  description: (close - low) / (high - low). 0 = closed at low, 1 = closed at high.
+- name: body_to_range
+  module: microstructure
+  source: per_ticker
+  lookback_days: 1
+  input: open,high,low,close
+  mask_on_special: mask
+  description: '|close - open| / (high - low). Candle body size relative to full range.
+    ~1 = wide-body day, ~0 = doji.'
+- name: ret_5d_rank_universe
+  module: cross_sectional
+  source: cross_sectional
+  lookback_days: 5
+  input: ret_5d
+  mask_on_special: keep
+  description: Percentile rank of ret_5d across the universe per date.
+- name: ret_5d_z_winsor
+  module: cross_sectional
+  source: cross_sectional
+  lookback_days: 5
+  input: ret_5d
+  mask_on_special: keep
+  description: Cross-sectional z-score of ret_5d per date, with the mean and std computed
+    from values winsorised at p01/p99 (raw value still divided by the robust std).
+- name: vol_20d_rank_universe
+  module: cross_sectional
+  source: cross_sectional
+  lookback_days: 20
+  input: realized_vol_20d
+  mask_on_special: keep
+  description: Percentile rank of realized_vol_20d across the universe per date.
+- name: vol_20d_z_winsor
+  module: cross_sectional
+  source: cross_sectional
+  lookback_days: 20
+  input: realized_vol_20d
+  mask_on_special: keep
+  description: Cross-sectional z-score of realized_vol_20d (winsorised).
+- name: turnover_rank_universe
+  module: cross_sectional
+  source: cross_sectional
+  lookback_days: 1
+  input: close,volume
+  mask_on_special: mask
+  description: Percentile rank of daily turnover (close * volume) across the universe.
+- name: ret_5d_rank_sector
+  module: cross_sectional
+  source: cross_sectional
+  lookback_days: 5
+  input: ret_5d
+  mask_on_special: keep
+  description: Percentile rank of ret_5d within ticker's sector per date. Null for
+    singleton sectors.
+- name: ret_5d_dist_sector_median
+  module: cross_sectional
+  source: cross_sectional
+  lookback_days: 5
+  input: ret_5d
+  mask_on_special: keep
+  description: ret_5d minus sector median of ret_5d per date. Null for singleton sectors.
+- name: beta_60d_nifty50
+  module: cross_sectional
+  source: cross_sectional
+  lookback_days: 60
+  input: ret_1d
+  mask_on_special: keep
+  description: Rolling 60-bar OLS beta of ret_1d to Nifty 50 daily returns. Null when
+    index is missing.
+- name: vix_level
+  module: regime
+  source: regime
+  lookback_days: 1
+  input: close
+  mask_on_special: keep
+  description: India VIX close on the date.
+- name: vix_pct_252d
+  module: regime
+  source: regime
+  lookback_days: 252
+  input: close
+  mask_on_special: keep
+  description: Rolling 252-bar percentile rank of vix_level.
+- name: nifty_above_sma_200
+  module: regime
+  source: regime
+  lookback_days: 200
+  input: close
+  mask_on_special: keep
+  description: 1 if Nifty 50 close above its 200-bar SMA, else 0.
+- name: corr_regime_60d
+  module: regime
+  source: regime
+  lookback_days: 60
+  input: adj_close
+  mask_on_special: keep
+  description: Rolling 60-bar mean pairwise correlation of daily returns across all
+    tickers in the universe.
