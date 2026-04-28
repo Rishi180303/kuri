@@ -1,0 +1,66 @@
+# NSE Nifty 50 ticker universe.
+#
+# Snapshot date: 2026-04-27
+# Source: NSE Nifty 50 constituents (https://www.nseindia.com/products-services/indices-nifty50-index)
+# NOTE: NSE rebalances Nifty indices semi-annually (Mar/Sep). Refresh this
+#       list on rebalance and bump `as_of` below; bumping the date is what
+#       triggers any downstream "is the universe stale?" check.
+#
+# yfinance requires the ".NS" suffix for NSE-listed equities. The suffix is
+# applied at fetch time, not stored here.
+
+as_of: "2026-04-27"
+index: "NIFTY 50"
+
+tickers:
+  - ADANIENT
+  - ADANIPORTS
+  - APOLLOHOSP
+  - ASIANPAINT
+  - AXISBANK
+  - BAJAJ-AUTO
+  - BAJFINANCE
+  - BAJAJFINSV
+  - BEL
+  - BHARTIARTL
+  - BPCL
+  - BRITANNIA
+  - CIPLA
+  - COALINDIA
+  - DRREDDY
+  - EICHERMOT
+  - GRASIM
+  - HCLTECH
+  - HDFCBANK
+  - HDFCLIFE
+  - HEROMOTOCO
+  - HINDALCO
+  - HINDUNILVR
+  - ICICIBANK
+  - INDUSINDBK
+  - INFY
+  - ITC
+  - JSWSTEEL
+  - KOTAKBANK
+  - LT
+  - LTIM
+  - M&M
+  - MARUTI
+  - NESTLEIND
+  - NTPC
+  - ONGC
+  - POWERGRID
+  - RELIANCE
+  - SBILIFE
+  - SBIN
+  - SHRIRAMFIN
+  - SUNPHARMA
+  - TATACONSUM
+  - TATAMOTORS
+  - TATASTEEL
+  - TCS
+  - TECHM
+  - TITAN
+  - TRENT
+  - ULTRACEMCO
+  - WIPRO

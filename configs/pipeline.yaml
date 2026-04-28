@@ -1,0 +1,34 @@
+# Pipeline configuration: paths, retry/rate-limit knobs, date defaults.
+# Override any value via env var with the TRADING_ prefix and double-underscore
+# nesting, e.g. TRADING_PATHS__DATA_DIR=/tmp/data.
+
+paths:
+  data_dir: "data"
+  raw_subdir: "raw"
+  ohlcv_subdir: "ohlcv"
+  index_subdir: "index"
+  flows_subdir: "flows"
+  log_dir: "data/logs"
+
+# yfinance / network knobs
+fetch:
+  request_sleep_seconds: 0.2      # 200ms between requests
+  max_attempts: 5                 # tenacity retry attempts
+  initial_backoff_seconds: 1.0
+  max_backoff_seconds: 30.0
+  http_timeout_seconds: 30
+
+# Default date range for backfill
+defaults:
+  backfill_start: "2018-01-01"
+
+# Index symbols (yfinance)
+indices:
+  nifty_50: "^NSEI"
+  nifty_500: "^CRSLDX"
+  india_vix: "^INDIAVIX"
+
+# Validation thresholds
+validation:
+  max_daily_return_abs: 0.5       # warn if |return| > 50% (split/anomaly)
+  min_volume: 0                   # zero-volume rows are flagged, not dropped

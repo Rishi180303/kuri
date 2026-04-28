@@ -1,0 +1,81 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+*.whl
+*.tar.gz
+.Python
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+.envrc
+
+# --- uv (uv.lock IS committed; .venv is not) ---
+
+# --- Tooling caches ---
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.cache/
+.tox/
+.hypothesis/
+
+# --- Coverage ---
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+.nox/
+
+# --- Notebooks (we don't use them, but defensive) ---
+.ipynb_checkpoints/
+*.ipynb
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/
+
+# --- OS junk ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# --- Project data — local only, never commit ---
+/data/
+!/data/.gitkeep
+*.parquet
+*.duckdb
+*.duckdb.wal
+
+# --- Prefect ---
+.prefect/
+prefect.db
+prefect.db-*
+
+# --- Logs ---
+*.log
+*.jsonl
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.yaml
+secrets.yml
