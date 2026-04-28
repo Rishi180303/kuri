@@ -14,10 +14,10 @@ import yfinance as yf
 
 from trading.config import FetchConfig, get_pipeline_config
 from trading.data.ohlcv import (
+    _RETRYABLE,
     Downloader,
     FetchError,
     _make_retry,
-    _RETRYABLE,
     _to_polars,
 )
 from trading.logging import get_logger

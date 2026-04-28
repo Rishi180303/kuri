@@ -6,15 +6,16 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies:
-          - pydantic>=2.10
-          - types-pyyaml
-        args: [--config-file=pyproject.toml]
+        name: mypy
+        entry: uv run mypy
+        language: system
+        types_or: [python, pyi]
         files: ^(src|tests)/
+        pass_filenames: false
+        args: [--config-file=pyproject.toml]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
