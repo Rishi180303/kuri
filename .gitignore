@@ -46,7 +46,14 @@ htmlcov/
 *.swp
 *.swo
 *~
+
+# --- Claude / agent local files (never commit) ---
 .claude/
+CLAUDE.md
+memory.md
+*.local.md
+AGENTS.md
+GEMINI.md
 
 # --- OS junk ---
 .DS_Store

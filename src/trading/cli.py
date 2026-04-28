@@ -1,6 +1,6 @@
-"""nseml — command-line entry point.
+"""kuri — command-line entry point.
 
-Wired into pyproject as `[project.scripts] nseml = "trading.cli:app"`.
+Wired into pyproject as `[project.scripts] kuri = "trading.cli:app"`.
 
 Subcommands:
     backfill         fetch full history for the universe
@@ -22,7 +22,7 @@ from trading.pipelines.update import daily_update_flow
 from trading.storage import DataStore, validate_ohlcv
 
 app = typer.Typer(
-    add_completion=False, no_args_is_help=True, help="nseml — Indian equity data pipeline."
+    add_completion=False, no_args_is_help=True, help="kuri — Indian equity data pipeline."
 )
 
 

@@ -1,7 +1,7 @@
 [project]
-name = "nseml"
+name = "kuri"
 version = "0.1.0"
-description = "End-to-end ML system for Indian equity markets — Phase 1: data pipeline."
+description = "End-to-end ML system for Indian equity markets. Phase 1: data pipeline."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Rishi" }]
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-nseml = "trading.cli:app"
+kuri = "trading.cli:app"
 
 [dependency-groups]
 dev = [

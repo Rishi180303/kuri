@@ -40,10 +40,10 @@ just install                 # uv sync all groups
 just hooks                   # pre commit hooks
 just backfill 2018-01-01     # full Nifty 50 history
 just test                    # 51 tests
-nseml --help
+kuri --help
 ```
 
-After backfill, `nseml update` fetches the latest day for every ticker. Stored data is Parquet on disk under `data/raw/`, queryable through DuckDB via `DataStore.query(sql)`.
+After backfill, `kuri update` fetches the latest day for every ticker. Stored data is Parquet on disk under `data/raw/`, queryable through DuckDB via `DataStore.query(sql)`.
 
 ## Layout
 

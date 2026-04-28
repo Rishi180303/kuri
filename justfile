@@ -48,16 +48,16 @@ check: lint typecheck test
 
 # Backfill universe from a start date (default 2018-01-01)
 backfill START="2018-01-01" END="":
-    uv run nseml backfill --start-date {{START}} {{ if END != "" { "--end-date " + END } else { "" } }}
+    uv run kuri backfill --start-date {{START}} {{ if END != "" { "--end-date " + END } else { "" } }}
 
 # Daily update — fetch latest data for all universe tickers
 update:
-    uv run nseml update
+    uv run kuri update
 
 # Validate stored data
 validate:
-    uv run nseml validate
+    uv run kuri validate
 
 # List the current ticker universe
 universe:
-    uv run nseml universe-list
+    uv run kuri universe-list
