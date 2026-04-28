@@ -55,6 +55,9 @@ memory.md
 AGENTS.md
 GEMINI.md
 
+# --- Local-only audit / exploration scripts ---
+scripts/explore.py
+
 # --- OS junk ---
 .DS_Store
 .AppleDouble
