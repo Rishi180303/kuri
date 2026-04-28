@@ -1,6 +1,6 @@
 # NSE Nifty 50 ticker universe.
 #
-# Snapshot date: 2026-04-27
+# Snapshot date: 2026-04-28
 # Source: NSE Nifty 50 constituents (https://www.nseindia.com/products-services/indices-nifty50-index)
 # NOTE: NSE rebalances Nifty indices semi-annually (Mar/Sep). Refresh this
 #       list on rebalance and bump `as_of` below; bumping the date is what
@@ -8,8 +8,15 @@
 #
 # yfinance requires the ".NS" suffix for NSE-listed equities. The suffix is
 # applied at fetch time, not stored here.
+#
+# KNOWN GAP: TATAMOTORS is excluded for now. Yahoo Finance's data feed for
+# `TATAMOTORS.NS` has been broken since the Oct 2024 demerger (TML split into
+# commercial vehicles + TMPV passenger vehicles). TMPV.NS only has data from
+# Oct 2025 onwards, which isn't enough history for our 2018+ backfill.
+# Revisit when Yahoo fixes the feed, or when we add an NSE-direct fetcher
+# as a fallback source.
 
-as_of: "2026-04-27"
+as_of: "2026-04-28"
 index: "NIFTY 50"
 
 tickers:
@@ -56,7 +63,7 @@ tickers:
   - SHRIRAMFIN
   - SUNPHARMA
   - TATACONSUM
-  - TATAMOTORS
+  # - TATAMOTORS  # excluded: Yahoo data broken post-demerger (see header note)
   - TATASTEEL
   - TCS
   - TECHM
