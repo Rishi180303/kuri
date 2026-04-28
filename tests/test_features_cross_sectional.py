@@ -131,6 +131,105 @@ def test_beta_finite_when_index_provided(
     assert all(abs(x) < 100 for x in arr)  # sanity bound; betas should be O(1)
 
 
+def test_beta_recovers_known_synthetic_slope(cfg: FeatureConfig) -> None:
+    """Construct a synthetic case where stock_ret = 1.5 * nifty_ret + small noise.
+
+    Beta should converge to ~1.5. Tolerance is loose because the noise is
+    real and we only have one ticker over one rolling window.
+    """
+    import math
+    from datetime import timedelta
+
+    universe = UniverseConfig(
+        as_of=date(2024, 1, 1),
+        index="X",
+        tickers=[TickerEntry(symbol="AAA", sector="S")],
+    )
+
+    n_days = 200
+    base = date(2024, 1, 1)
+    # Deterministic LCG-style noise for reproducibility (no numpy randomness)
+    h = 12345
+    nifty_rets = []
+    stock_rets = []
+    for _i in range(n_days):
+        h = (1103515245 * h + 12345) & 0x7FFFFFFF
+        market_r = ((h / 0x7FFFFFFF) - 0.5) * 0.02  # market daily ret in ±1%
+        h = (1103515245 * h + 12345) & 0x7FFFFFFF
+        noise = ((h / 0x7FFFFFFF) - 0.5) * 0.002  # noise daily ret in ±0.1%
+        nifty_rets.append(market_r)
+        stock_rets.append(1.5 * market_r + noise)
+
+    # Build OHLCV-shaped frames from those returns
+    def _from_returns(symbol: str, rets: list[float]) -> pl.DataFrame:
+        prices = [100.0]
+        for r in rets:
+            prices.append(prices[-1] * (1 + r))
+        # Drop the seed price; keep n_days entries
+        prices = prices[1:]
+        rows = []
+        for i, p in enumerate(prices):
+            d = base + timedelta(days=i)
+            rows.append(
+                {
+                    "date": d,
+                    "ticker": symbol,
+                    "open": p,
+                    "high": p * 1.0001,
+                    "low": p * 0.9999,
+                    "close": p,
+                    "volume": 1_000_000,
+                    "adj_close": p,
+                }
+            )
+        return pl.DataFrame(rows)
+
+    stacked = _from_returns("AAA", stock_rets)
+    nifty = _from_returns("^NSEI", nifty_rets)
+
+    pt = price.compute(stacked, cfg).join(volatility.compute(stacked, cfg), on=["date", "ticker"])
+    out = cross_sectional.compute(stacked, pt, universe, cfg, indices={"^NSEI": nifty})
+    beta = out[f"beta_{cfg.beta_window}d_nifty50"].drop_nulls()
+    assert beta.len() > 0
+    # Mean beta over the rolling history should land near 1.5; tolerance ±0.15
+    mean_val = beta.mean()
+    assert isinstance(mean_val, float)
+    assert math.isfinite(mean_val)
+    assert abs(mean_val - 1.5) < 0.15, f"mean beta {mean_val:.3f} far from synthetic 1.5"
+
+
+def test_beta_robust_to_index_missing_dates(cfg: FeatureConfig) -> None:
+    """If the ticker has dates the index doesn't, beta on those dates is null
+    but later rows must still produce non-null beta (the bug we fixed).
+    """
+    universe = UniverseConfig(
+        as_of=date(2024, 1, 1),
+        index="X",
+        tickers=[TickerEntry(symbol="AAA", sector="S")],
+    )
+    stacked = synthetic_ohlcv(tickers=["AAA"], n_days=200)
+    # Make a "Nifty" missing 1 random date in the middle
+    nifty = stacked.group_by("date").agg(pl.col("close").mean().alias("close")).sort("date")
+    missing_date = nifty["date"][100]
+    nifty_with_hole = nifty.filter(pl.col("date") != missing_date)
+
+    pt = price.compute(stacked, cfg).join(volatility.compute(stacked, cfg), on=["date", "ticker"])
+    out = cross_sectional.compute(stacked, pt, universe, cfg, indices={"^NSEI": nifty_with_hole})
+    beta_col = f"beta_{cfg.beta_window}d_nifty50"
+
+    # The single missing date should have null beta (no market_ret to align).
+    on_missing = out.filter(pl.col("date") == missing_date)[beta_col]
+    assert on_missing.null_count() == on_missing.len()
+
+    # And in the 60 days AFTER the missing date, beta should NOT be all null
+    # (this was the bug: a single null poisoned the next 60 rolling rows).
+    after = out.filter(pl.col("date") > missing_date).sort("date")[beta_col]
+    later_window = after.tail(60).drop_nulls()
+    assert (
+        later_window.len() > 0
+    ), "post-missing-date window has no non-null beta — null poisoning regression"
+
+
 def test_universe_rank_handles_ties(cfg: FeatureConfig) -> None:
     """All tickers same value → rank ~0.5 (or null when N=1)."""
     universe = UniverseConfig(

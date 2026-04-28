@@ -238,26 +238,55 @@ def compute(
         dist_med.alias("ret_5d_dist_sector_median"),
     )
 
-    # Beta to Nifty 50: use ret_1d for ticker, daily index pct_change for market.
+    # Beta to Nifty 50: rolling cov(stock_ret, market_ret) / var(market_ret).
+    #
+    # The index occasionally has fewer trading days than tickers (yfinance
+    # logs January 1st rows for some equities even though the Nifty index
+    # didn't trade, and Diwali muhurat alignment can differ between equity
+    # and index symbols). After a left-join, those rows have a null
+    # market_ret. With min_samples=window, ANY null in the rolling window
+    # poisons the next window-many rows. We therefore compute the rolling
+    # window on the (date, ticker) rows where market_ret exists, then
+    # left-join the result back so every original row is preserved with
+    # null beta on dates the index didn't trade.
+    #
+    # ddof note: covariance is `E[XY] - E[X]E[Y]` (population, ddof=0). We
+    # pair it with `rolling_var(ddof=0)` so the beta = cov / var ratio is
+    # consistent. Mixing ddof=0 cov with ddof=1 var biased beta low by
+    # (n-1)/n (~1.7% at n=60).
     beta_col = f"beta_{cfg.beta_window}d_nifty50"
     nifty = (indices or {}).get(NIFTY50_SYMBOL)
     if nifty is None or nifty.is_empty():
         df = df.with_columns(pl.lit(None, dtype=pl.Float64).alias(beta_col))
     else:
         market = nifty.select(["date", pl.col(cfg.close_col).pct_change().alias("market_ret")])
-        df = df.join(market, on="date", how="left")
-        # Polars 1.x supports rolling_cov via expression; we compute manually
-        # so the call works regardless of version.
         w = cfg.beta_window
-        cov = (pl.col("ret_1d") * pl.col("market_ret")).rolling_mean(
-            window_size=w, min_samples=w
-        ).over("ticker") - pl.col("ret_1d").rolling_mean(window_size=w, min_samples=w).over(
-            "ticker"
-        ) * pl.col("market_ret").rolling_mean(window_size=w, min_samples=w).over("ticker")
-        var_m = pl.col("market_ret").rolling_var(window_size=w, min_samples=w).over("ticker")
+
+        # Compute beta on the inner-joined frame (rows where both ret_1d AND
+        # market_ret are observed). Sort by (ticker, date) so the rolling
+        # window's order is correct within each ticker.
+        beta_frame = (
+            df.select(["date", "ticker", "ret_1d"])
+            .join(market, on="date", how="inner")
+            .filter(pl.col("ret_1d").is_not_null() & pl.col("market_ret").is_not_null())
+            .sort(["ticker", "date"])
+        )
+        e_xy = (
+            (pl.col("ret_1d") * pl.col("market_ret"))
+            .rolling_mean(window_size=w, min_samples=w)
+            .over("ticker")
+        )
+        e_x = pl.col("ret_1d").rolling_mean(window_size=w, min_samples=w).over("ticker")
+        e_y = pl.col("market_ret").rolling_mean(window_size=w, min_samples=w).over("ticker")
+        cov = e_xy - e_x * e_y
+        var_m = (
+            pl.col("market_ret").rolling_var(window_size=w, ddof=0, min_samples=w).over("ticker")
+        )
         beta = pl.when(var_m > 0).then(cov / var_m).otherwise(None)
-        df = df.with_columns(beta.alias(beta_col))
-        df = df.drop("market_ret")
+        beta_frame = beta_frame.with_columns(beta.alias(beta_col)).select(
+            ["date", "ticker", beta_col]
+        )
+        df = df.join(beta_frame, on=["date", "ticker"], how="left")
 
     feat_names = [m.name for m in get_meta(cfg)]
     return df.select(["date", "ticker", *feat_names])

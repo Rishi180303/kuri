@@ -112,3 +112,90 @@ def test_warmup_nulls_present(stacked: pl.DataFrame, cfg: FeatureConfig) -> None
 @pytest.mark.parametrize("midpoint_offset", [50, 200, 350])
 def test_no_lookahead(stacked: pl.DataFrame, cfg: FeatureConfig, midpoint_offset: int) -> None:
     assert_no_lookahead(price.compute, stacked, midpoint_offset, cfg)
+
+
+# ---------------------------------------------------------------------------
+# gap_fill_rate edge cases (5 hand-constructed scenarios)
+# ---------------------------------------------------------------------------
+
+
+def _two_day_frame(prev_close: float, open_: float, close: float) -> pl.DataFrame:
+    """Build a 2-day OHLCV frame with the given prev_close and same-day open/close.
+
+    Day 1: only prev_close matters.
+    Day 2: open = open_, close = close. gap_fill_rate computed at day 2.
+    """
+    from datetime import date as date_cls
+
+    return pl.DataFrame(
+        {
+            "date": [date_cls(2024, 1, 1), date_cls(2024, 1, 2)],
+            "ticker": ["X", "X"],
+            "open": [prev_close, open_],
+            "high": [prev_close, max(open_, close) + 0.01],
+            "low": [prev_close, min(open_, close) - 0.01],
+            "close": [prev_close, close],
+            "volume": [1_000_000, 1_000_000],
+            "adj_close": [prev_close, close],
+        }
+    )
+
+
+def test_gap_fill_rate_zero_gap_is_null(cfg: FeatureConfig) -> None:
+    """Open exactly equals prev_close → gap_fill_rate must be null."""
+    df = _two_day_frame(prev_close=100.0, open_=100.0, close=101.0)
+    out = price.compute(df, cfg).sort("date")
+    assert out["gap_fill_rate"].tail(1).item() is None
+    assert out["gap_fill_rate_winsor"].tail(1).item() is None
+
+
+def test_gap_fill_rate_tiny_gap_is_null(cfg: FeatureConfig) -> None:
+    """|gap| < 0.1% of prev_close → null even though numerically non-zero."""
+    # gap = 0.05% of prev_close = below the 0.1% threshold
+    df = _two_day_frame(prev_close=100.0, open_=100.05, close=100.5)
+    out = price.compute(df, cfg).sort("date")
+    assert out["gap_fill_rate"].tail(1).item() is None
+    assert out["gap_fill_rate_winsor"].tail(1).item() is None
+
+
+def test_gap_fill_rate_gap_fully_filled(cfg: FeatureConfig) -> None:
+    """Gap up day, close at prev_close → retention = 0 (gap fully closed)."""
+    df = _two_day_frame(prev_close=100.0, open_=102.0, close=100.0)
+    out = price.compute(df, cfg).sort("date")
+    rate = out["gap_fill_rate"].tail(1).item()
+    assert rate is not None
+    assert abs(rate - 0.0) < 1e-12
+
+
+def test_gap_fill_rate_gap_not_filled(cfg: FeatureConfig) -> None:
+    """Gap up day, close at open → retention = 1 (gap fully retained)."""
+    df = _two_day_frame(prev_close=100.0, open_=102.0, close=102.0)
+    out = price.compute(df, cfg).sort("date")
+    rate = out["gap_fill_rate"].tail(1).item()
+    assert rate is not None
+    assert abs(rate - 1.0) < 1e-12
+
+
+def test_gap_fill_rate_reversed_past_prev_close(cfg: FeatureConfig) -> None:
+    """Gap up day, close below prev_close → retention < 0."""
+    df = _two_day_frame(prev_close=100.0, open_=102.0, close=99.0)
+    out = price.compute(df, cfg).sort("date")
+    rate = out["gap_fill_rate"].tail(1).item()
+    # (99 - 100) / (102 - 100) = -1 / 2 = -0.5
+    assert rate is not None
+    assert abs(rate - (-0.5)) < 1e-12
+
+
+def test_gap_fill_rate_winsor_clips_extreme_values(cfg: FeatureConfig) -> None:
+    """A gap just above the 0.1% threshold can produce extreme fill rates;
+    the winsor variant must be clipped to [-2, 2]."""
+    # gap = 0.11% of prev_close (just above null threshold), close moves a lot
+    # Raw: (109 - 100) / (100.11 - 100) = 9 / 0.11 ≈ 81.8 → far outside [-2, 2]
+    df = _two_day_frame(prev_close=100.0, open_=100.11, close=109.0)
+    out = price.compute(df, cfg).sort("date")
+    raw = out["gap_fill_rate"].tail(1).item()
+    winsor = out["gap_fill_rate_winsor"].tail(1).item()
+    assert raw is not None and raw > 50  # raw is unbounded
+    assert winsor is not None
+    assert -2.0 - 1e-12 <= winsor <= 2.0 + 1e-12
+    assert abs(winsor - 2.0) < 1e-12  # clipped to upper bound

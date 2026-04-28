@@ -2,13 +2,20 @@
 #
 # These are dates where only a subset of stocks traded (Diwali muhurat
 # evening sessions, NSE-declared special sessions, etc.). The Phase 1.5
-# audit found ~95% of zero-volume rows clustered on these three dates.
+# audit found ~95% of zero-volume rows clustered on these dates.
 #
 # Add new dates here when NSE announces them (e.g. each Diwali muhurat
 # session). No code changes required — calendar.is_special_session()
 # reads from this list.
+#
+# Audit pattern: cross-reference equity dates against ALL three indices
+# (^NSEI, ^CRSLDX, ^INDIAVIX). Any equity date absent from every index is
+# almost always a partial / muhurat session that belongs here. Re-run the
+# audit when new data arrives — see project memory for the recipe.
 
 special_sessions:
   - 2018-11-07   # Diwali muhurat (Samvat 2075)
+  - 2019-10-27   # Diwali muhurat (Samvat 2076) — added 2026-04-28 audit
+  - 2020-11-14   # Diwali muhurat (Samvat 2077) — added 2026-04-28 audit
   - 2025-03-18   # special session (intra-day-only window)
-  - 2026-01-15   # Diwali muhurat (Samvat 2083)
+  - 2026-01-15   # special session

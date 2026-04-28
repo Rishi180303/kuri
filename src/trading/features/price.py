@@ -12,6 +12,16 @@ Convention:
 
 Mask policy on special sessions: all KEEP. Price discovery happens in
 muhurat sessions, so returns and MA distances remain valid.
+
+Audit note (2026-04-28): the `dist_sma_*_pct` and `dist_ema_*_pct` columns
+have wide ranges (p99 of dist_sma_200_pct is ~57% on the Nifty 50 backfill,
+with a long bull-market tail). Those values are real momentum signal, not
+divide-by-near-zero pathology like the original gap_fill_rate had. Per-window
+p99/p95 ratios sit at 1.59-1.69, at or below a normal distribution, so these
+features are not fat-tailed in a way that warrants a winsorized variant.
+Do NOT add `_winsor` columns for the dist_*_pct family — winsorizing would
+clip ~2% of legitimate breakout signal. Revisit during Phase 3 feature
+normalisation if a model demands clipped inputs at training time.
 """
 
 from __future__ import annotations
@@ -74,8 +84,27 @@ def get_meta(cfg: FeatureConfig | None = None) -> list[FeatureMeta]:
                 input_cols=("open", "close"),
                 mask_on_special=MaskPolicy.KEEP,
                 description=(
-                    "Fraction of the open-vs-prev-close gap that the close "
-                    "filled (sign-aware). Null when gap is ~zero."
+                    "Position of close within the gap range, defined as "
+                    "(close - prev_close) / (open - prev_close). 1 = closed at "
+                    "open (gap fully retained), 0 = closed at prev_close (gap "
+                    "fully closed), values > 1 = continuation past open, "
+                    "values < 0 = reversed past prev_close. Null when "
+                    "|gap_overnight| < 0.1% of prev_close to avoid "
+                    "near-zero-denominator instability. Raw and unbounded; use "
+                    "gap_fill_rate_winsor in models."
+                ),
+            ),
+            FeatureMeta(
+                name="gap_fill_rate_winsor",
+                module=_MODULE,
+                source=FeatureSource.PER_TICKER,
+                lookback_days=2,
+                input_cols=("open", "close"),
+                mask_on_special=MaskPolicy.KEEP,
+                description=(
+                    "gap_fill_rate clipped to [-2, 2]. Most days fall in this "
+                    "range; clipping protects models from rare extremes when "
+                    "the gap is near (but above) the 0.1% null threshold."
                 ),
             ),
         ]
@@ -144,14 +173,33 @@ def compute(
     # One-bar log return
     exprs.append((adj.log() - adj.log().shift(1).over("ticker")).alias("log_ret_1d"))
 
-    # Gap features (unadjusted close)
+    # Gap features (unadjusted close).
+    # gap_fill_rate uses retention semantics: (close - prev_close) / (open - prev_close).
+    # 1 = closed at open (gap retained), 0 = closed at prev_close (gap closed),
+    # > 1 = continuation past open, < 0 = reversed past prev_close.
+    # Null when the gap is below 0.1% of prev_close to avoid divide-by-near-zero
+    # instability — that threshold catches the tiny-gap rows that produced
+    # |rate| > 5 in 28% of all rows in the prior implementation.
     prev_close = close_unadj.shift(1).over("ticker")
     gap = (open_ - prev_close) / prev_close
-    fill = (close_unadj - open_) / prev_close
+    fill_rate = (close_unadj - prev_close) / (open_ - prev_close)
+    fill_rate_safe = pl.when(gap.abs() < 0.001).then(None).otherwise(fill_rate)
+    # Clamp manually so nulls in fill_rate_safe stay null (min_horizontal /
+    # max_horizontal silently drop nulls, which would un-null tiny-gap days).
+    fill_rate_winsor = (
+        pl.when(fill_rate_safe.is_null())
+        .then(None)
+        .when(fill_rate_safe < -2.0)
+        .then(-2.0)
+        .when(fill_rate_safe > 2.0)
+        .then(2.0)
+        .otherwise(fill_rate_safe)
+    )
     exprs.extend(
         [
             gap.alias("gap_overnight"),
-            pl.when(gap.abs() < 1e-9).then(None).otherwise(fill / gap).alias("gap_fill_rate"),
+            fill_rate_safe.alias("gap_fill_rate"),
+            fill_rate_winsor.alias("gap_fill_rate_winsor"),
         ]
     )
 

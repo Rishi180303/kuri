@@ -51,6 +51,7 @@ htmlcov/
 .claude/
 CLAUDE.md
 memory.md
+docs/superpowers/
 *.local.md
 AGENTS.md
 GEMINI.md

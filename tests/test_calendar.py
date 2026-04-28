@@ -21,6 +21,16 @@ def test_is_special_session_uses_default_config() -> None:
     assert not is_special_session(date(2024, 5, 6))
 
 
+def test_recovered_diwali_muhurat_dates_in_special_sessions() -> None:
+    """Lock-in: 2019 and 2020 Diwali muhurat sessions were missed during
+    Phase 1.5 setup. The 2026-04-28 audit (cross-referencing equity dates
+    against all 3 indices) recovered them. This test guards against them
+    silently disappearing from configs/calendar.yaml in the future.
+    """
+    assert is_special_session(date(2019, 10, 27))
+    assert is_special_session(date(2020, 11, 14))
+
+
 def test_is_special_session_with_override() -> None:
     cfg = CalendarConfig(special_sessions=[date(2030, 1, 1)])
     assert is_special_session(date(2030, 1, 1), cfg)

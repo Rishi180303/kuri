@@ -1,5 +1,5 @@
 feature_set_version: 1
-n_features: 63
+n_features: 64
 features:
 - name: ret_1d
   module: price
@@ -56,8 +56,21 @@ features:
   lookback_days: 2
   input: open,close
   mask_on_special: keep
-  description: Fraction of the open-vs-prev-close gap that the close filled (sign-aware).
-    Null when gap is ~zero.
+  description: Position of close within the gap range, defined as (close - prev_close)
+    / (open - prev_close). 1 = closed at open (gap fully retained), 0 = closed at
+    prev_close (gap fully closed), values > 1 = continuation past open, values < 0
+    = reversed past prev_close. Null when |gap_overnight| < 0.1% of prev_close to
+    avoid near-zero-denominator instability. Raw and unbounded; use gap_fill_rate_winsor
+    in models.
+- name: gap_fill_rate_winsor
+  module: price
+  source: per_ticker
+  lookback_days: 2
+  input: open,close
+  mask_on_special: keep
+  description: gap_fill_rate clipped to [-2, 2]. Most days fall in this range; clipping
+    protects models from rare extremes when the gap is near (but above) the 0.1% null
+    threshold.
 - name: dist_sma_20_pct
   module: price
   source: per_ticker

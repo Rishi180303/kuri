@@ -234,13 +234,60 @@ def features_list() -> None:
             typer.echo(f"  {mask_tag} {m.name:32s} lookback={m.lookback_days:>4}  {m.description}")
 
 
+_INSPECT_CATEGORIES = (
+    "all",
+    "price",
+    "volatility",
+    "trend",
+    "momentum",
+    "volume",
+    "microstructure",
+    "cross_sectional",
+    "regime",
+)
+
+
 @features_app.command("inspect")
 def features_inspect(
     ticker: str = typer.Argument(..., help="Ticker symbol to inspect."),
     n: int = typer.Option(10, "--n", help="Number of recent rows to display."),
     version: int = typer.Option(1, "--version", help="Feature set version."),
+    category: str = typer.Option(
+        "all",
+        "--category",
+        help=(
+            "Filter columns to one feature module. One of: price, volatility, trend, "
+            "momentum, volume, microstructure, cross_sectional, regime, or 'all' "
+            "(default; keeps prior behavior). With a specific category the table "
+            "uses a wider terminal layout so values are readable."
+        ),
+    ),
+    fmt: str = typer.Option(
+        "table",
+        "--format",
+        help=(
+            "Output format: 'table' (default, Polars rendering) or 'csv' (write CSV "
+            "to stdout for piping into other tools)."
+        ),
+    ),
 ) -> None:
-    """Display the last N rows of features for a ticker."""
+    """Display the last N rows of features for a ticker.
+
+    Examples:
+        kuri features inspect RELIANCE --category trend --n 30
+        kuri features inspect RELIANCE --category cross_sectional --n 30
+        kuri features inspect RELIANCE --format csv > /tmp/features.csv
+    """
+    if category not in _INSPECT_CATEGORIES:
+        typer.echo(
+            f"Invalid --category: {category!r}. "
+            f"Choose one of: {', '.join(_INSPECT_CATEGORIES)}."
+        )
+        raise typer.Exit(code=2)
+    if fmt not in ("table", "csv"):
+        typer.echo(f"Invalid --format: {fmt!r}. Choose 'table' or 'csv'.")
+        raise typer.Exit(code=2)
+
     pipeline_cfg = get_pipeline_config()
     feature_root = pipeline_cfg.paths.data_dir / "features"
     fstore = FeatureStore(feature_root, version=version)
@@ -248,8 +295,32 @@ def features_inspect(
     if df.is_empty():
         typer.echo(f"No features stored for {ticker} at v{version}. Run `kuri features compute`.")
         raise typer.Exit(code=1)
-    with pl.Config(tbl_rows=n + 5, tbl_cols=20, tbl_hide_dataframe_shape=True):
-        typer.echo(str(df.tail(n)))
+
+    # Filter columns to the chosen category (if not "all").
+    if category != "all":
+        category_cols = [m.name for m in all_metas() if m.module == category]
+        keep = ["date", "ticker", *[c for c in category_cols if c in df.columns]]
+        df = df.select(keep)
+
+    df = df.tail(n)
+
+    if fmt == "csv":
+        typer.echo(df.write_csv().rstrip("\n"))
+        return
+
+    # Table output: when filtered to a single category, expand the terminal so
+    # all 4-15 columns of that module fit comfortably.
+    if category == "all":
+        with pl.Config(tbl_rows=n + 5, tbl_cols=20, tbl_hide_dataframe_shape=True):
+            typer.echo(str(df))
+    else:
+        with pl.Config(
+            tbl_rows=n + 5,
+            tbl_cols=50,
+            tbl_width_chars=300,
+            tbl_hide_dataframe_shape=True,
+        ):
+            typer.echo(str(df))
 
 
 @features_app.command("write-yaml")
