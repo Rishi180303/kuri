@@ -16,6 +16,13 @@ Feature subcommands (`kuri features ...`):
     inspect          last N rows of features for a ticker
     write-yaml       regenerate configs/features.yaml from code
     validate-yaml    diff configs/features.yaml against code; exit 1 if drift
+
+Label subcommands (`kuri labels ...`):
+    generate         compute and persist forward-return labels
+    inspect          print label distribution and sample rows
+
+Training subcommands (`kuri training ...`):
+    prepare-data     load training data and print summary stats
 """
 
 from __future__ import annotations
@@ -33,10 +40,12 @@ from trading.features.yaml_io import (
     diff_features_yaml,
     write_features_yaml,
 )
+from trading.labels import LabelStore, compute_labels, label_columns_for_horizon
 from trading.logging import configure_logging, get_logger
 from trading.pipelines.backfill import backfill_flow
 from trading.pipelines.update import daily_update_flow
 from trading.storage import DataStore, validate_ohlcv
+from trading.training.data import load_training_data
 
 app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="kuri — Indian equity data pipeline."
@@ -45,6 +54,14 @@ features_app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="Feature engineering commands."
 )
 app.add_typer(features_app, name="features")
+labels_app = typer.Typer(
+    add_completion=False, no_args_is_help=True, help="Label generation commands."
+)
+app.add_typer(labels_app, name="labels")
+training_app = typer.Typer(
+    add_completion=False, no_args_is_help=True, help="Training-side utilities."
+)
+app.add_typer(training_app, name="training")
 
 
 def _bootstrap_logging(verbose: bool) -> None:
@@ -341,6 +358,174 @@ def features_validate_yaml() -> None:
     typer.echo(diff)
     typer.echo("\nRun `kuri features write-yaml` to regenerate.")
     raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# Label subcommands
+# ---------------------------------------------------------------------------
+
+
+def _parse_horizons(s: str) -> tuple[int, ...]:
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    if not parts:
+        raise typer.BadParameter("--horizons must contain at least one value")
+    try:
+        out = tuple(int(p) for p in parts)
+    except ValueError as e:
+        raise typer.BadParameter(f"--horizons must be comma-separated ints, got {s!r}") from e
+    if any(h <= 0 for h in out):
+        raise typer.BadParameter("horizons must be positive")
+    return out
+
+
+@labels_app.command("generate")
+def labels_generate(
+    horizons: str = typer.Option(
+        "5,10,20", "--horizons", help="Comma-separated forward horizons in trading days."
+    ),
+    start_date: str | None = typer.Option(
+        None, "--start-date", help="Inclusive start date YYYY-MM-DD."
+    ),
+    version: int = typer.Option(1, "--version", help="Label set version (output path)."),
+) -> None:
+    """Compute forward-return labels and persist to data/labels/v{version}/."""
+    log = get_logger("cli.labels.generate")
+    horizons_t = _parse_horizons(horizons)
+    pipeline_cfg = get_pipeline_config()
+    store = DataStore(pipeline_cfg.paths.data_dir)
+    tickers = store.list_tickers()
+    if not tickers:
+        typer.echo("No OHLCV data in storage. Run `kuri backfill` first.")
+        raise typer.Exit(code=1)
+
+    start = parse_iso_date(start_date) if start_date else None
+    frames = []
+    for t in tickers:
+        df = store.load_ohlcv(t, start=start)
+        if not df.is_empty():
+            frames.append(df)
+    if not frames:
+        typer.echo("No OHLCV rows matched the date filter.")
+        raise typer.Exit(code=1)
+
+    ohlcv = pl.concat(frames, how="vertical_relaxed").sort(["ticker", "date"])
+    log.info(
+        "cli.labels.generate.start",
+        rows=ohlcv.height,
+        tickers=ohlcv["ticker"].n_unique(),
+        horizons=list(horizons_t),
+    )
+    labels = compute_labels(ohlcv, horizons=horizons_t)
+
+    label_store = LabelStore(pipeline_cfg.paths.data_dir / "labels", version=version)
+    n_written = label_store.save_per_ticker(labels)
+    typer.echo(
+        f"Labels generated: {n_written:,} rows across {labels['ticker'].n_unique()} tickers, "
+        f"horizons={list(horizons_t)}, version=v{version}."
+    )
+
+
+@labels_app.command("inspect")
+def labels_inspect(
+    horizon: int = typer.Option(5, "--horizon", help="Horizon to inspect."),
+    version: int = typer.Option(1, "--version", help="Label set version."),
+    n: int = typer.Option(10, "--n", help="Number of recent rows per ticker to display."),
+    ticker: str | None = typer.Option(
+        None, "--ticker", help="Show one ticker only; default shows distribution + a sample."
+    ),
+) -> None:
+    """Print label distribution and a sample of recent rows."""
+    pipeline_cfg = get_pipeline_config()
+    label_store = LabelStore(pipeline_cfg.paths.data_dir / "labels", version=version)
+    cls_col, reg_col = label_columns_for_horizon(horizon)
+
+    df = label_store.query(f"SELECT date, ticker, {cls_col}, {reg_col} FROM labels")
+    if df.is_empty():
+        typer.echo(f"No labels stored at v{version}. Run `kuri labels generate` first.")
+        raise typer.Exit(code=1)
+
+    valid = df.drop_nulls(cls_col)
+    n_valid = valid.height
+    n_null = df.height - n_valid
+    pct_ones = 100.0 * float((valid[cls_col] == 1).sum() or 0) / max(n_valid, 1)
+    typer.echo(
+        f"Horizon {horizon}d (v{version}): {df.height:,} rows  "
+        f"valid={n_valid:,}  null={n_null:,}  pct_ones={pct_ones:.2f}%"
+    )
+
+    if ticker:
+        sub = df.filter(pl.col("ticker") == ticker).sort("date").tail(n)
+        if sub.is_empty():
+            typer.echo(f"No rows for ticker {ticker!r}.")
+            raise typer.Exit(code=1)
+        with pl.Config(tbl_rows=n + 5, tbl_hide_dataframe_shape=True):
+            typer.echo(str(sub))
+    else:
+        sample = (
+            df.sort(["ticker", "date"]).group_by("ticker", maintain_order=True).tail(2).head(20)
+        )
+        with pl.Config(tbl_rows=25, tbl_hide_dataframe_shape=True):
+            typer.echo(str(sample))
+
+
+# ---------------------------------------------------------------------------
+# Training subcommands
+# ---------------------------------------------------------------------------
+
+
+@training_app.command("prepare-data")
+def training_prepare_data(
+    start_date: str | None = typer.Option(
+        None, "--start-date", help="Inclusive start date YYYY-MM-DD."
+    ),
+    end_date: str | None = typer.Option(None, "--end-date", help="Inclusive end date YYYY-MM-DD."),
+    horizons: str = typer.Option("5", "--horizons", help="Comma-separated horizons."),
+    feature_version: int = typer.Option(1, "--feature-version"),
+    label_version: int = typer.Option(1, "--label-version"),
+) -> None:
+    """Load the training table and print summary stats (no model training)."""
+    horizons_t = _parse_horizons(horizons)
+    start = parse_iso_date(start_date) if start_date else None
+    end = parse_iso_date(end_date) if end_date else None
+
+    df = load_training_data(
+        start=start,
+        end=end,
+        horizons=horizons_t,
+        feature_version=feature_version,
+        label_version=label_version,
+    )
+    typer.echo(f"Rows:           {df.height:,}")
+    typer.echo(f"Columns:        {df.width}")
+    typer.echo(f"Date range:     {df['date'].min()!s} to {df['date'].max()!s}")
+    typer.echo(f"Tickers:        {df['ticker'].n_unique()}")
+    typer.echo(f"Sectors:        {df['sector'].n_unique()}")
+
+    for h in horizons_t:
+        cls_col, _ = label_columns_for_horizon(h)
+        if cls_col in df.columns:
+            s = df[cls_col]
+            n_valid = int(s.drop_nulls().len())
+            n_ones = int((s == 1).sum() or 0)
+            pct_ones = 100.0 * n_ones / max(n_valid, 1)
+            typer.echo(f"Horizon {h}d label: valid={n_valid:,}  ones={n_ones:,} ({pct_ones:.2f}%)")
+
+    # Top features by null count (helps spot warmup or data issues)
+    feat_cols = [
+        c
+        for c in df.columns
+        if c not in ("date", "ticker", "sector")
+        and not c.startswith("outperforms_universe_median_")
+        and not c.startswith("forward_ret_")
+    ]
+    null_pcts = sorted(
+        ((c, 100.0 * df[c].null_count() / df.height) for c in feat_cols),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )
+    typer.echo("\nTop 5 features by null fraction:")
+    for c, pct in null_pcts[:5]:
+        typer.echo(f"  {c:<32} {pct:>6.2f}%")
 
 
 if __name__ == "__main__":  # pragma: no cover

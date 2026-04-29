@@ -78,6 +78,10 @@ Desktop.ini
 prefect.db
 prefect.db-*
 
+# --- MLflow ---
+mlruns/
+mlartifacts/
+
 # --- Logs ---
 *.log
 *.jsonl
