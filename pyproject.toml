@@ -20,6 +20,8 @@ dependencies = [
     "pyyaml>=6.0.2",
     "scikit-learn>=1.5.0",
     "mlflow>=2.16.0",
+    "lightgbm>=4.5.0",
+    "optuna>=4.0.0",
 ]
 
 [project.scripts]
@@ -86,7 +88,7 @@ pretty = true
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["yfinance.*", "duckdb.*", "pandas.*", "sklearn.*", "mlflow.*"]
+module = ["yfinance.*", "duckdb.*", "pandas.*", "sklearn.*", "mlflow.*", "lightgbm.*", "optuna.*", "joblib.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

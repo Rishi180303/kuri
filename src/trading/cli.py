@@ -23,9 +23,16 @@ Label subcommands (`kuri labels ...`):
 
 Training subcommands (`kuri training ...`):
     prepare-data     load training data and print summary stats
+
+Model subcommands (`kuri models ...`):
+    train-lgbm       walk-forward training of the LightGBM baseline
+    evaluate-lgbm    aggregate fold results into the evaluation report
+    compare-runs     pull recent MLflow runs and print a summary table
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import polars as pl
 import typer
@@ -62,6 +69,10 @@ training_app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="Training-side utilities."
 )
 app.add_typer(training_app, name="training")
+models_app = typer.Typer(
+    add_completion=False, no_args_is_help=True, help="Model training and evaluation."
+)
+app.add_typer(models_app, name="models")
 
 
 def _bootstrap_logging(verbose: bool) -> None:
@@ -526,6 +537,136 @@ def training_prepare_data(
     typer.echo("\nTop 5 features by null fraction:")
     for c, pct in null_pcts[:5]:
         typer.echo(f"  {c:<32} {pct:>6.2f}%")
+
+
+# ---------------------------------------------------------------------------
+# Model subcommands
+# ---------------------------------------------------------------------------
+
+
+def _parse_fold_list(s: str | None) -> list[int] | None:
+    if s is None:
+        return None
+    s = s.strip()
+    if not s or s.lower() == "all":
+        return None
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    try:
+        return [int(p) for p in parts]
+    except ValueError as e:
+        raise typer.BadParameter(f"--folds must be 'all' or comma-separated ints, got {s!r}") from e
+
+
+@models_app.command("train-lgbm")
+def models_train_lgbm(
+    folds: str | None = typer.Option(
+        None, "--folds", help="Comma-separated fold IDs, or 'all' (default: all)."
+    ),
+    n_trials: int = typer.Option(50, "--n-trials", help="Optuna trials per fold."),
+    horizon: int = typer.Option(5, "--horizon", help="Forward-return horizon in days."),
+    n_shuffles: int = typer.Option(
+        1000, "--n-shuffles", help="Permutation count for the shuffle baseline IC."
+    ),
+    feature_set_version: int = typer.Option(1, "--feature-version"),
+    label_version: int = typer.Option(1, "--label-version"),
+    report_path: str = typer.Option(
+        "reports/lgbm_v1_evaluation.json",
+        "--report-path",
+        help="Where to write the evaluation report JSON.",
+    ),
+) -> None:
+    """Walk-forward LightGBM training with Optuna tuning per fold."""
+    from trading.training.evaluate import aggregate_fold_results, render_summary, write_report
+    from trading.training.train_lgbm import train_lgbm_walk_forward
+
+    fold_list = _parse_fold_list(folds)
+    log = get_logger("cli.models.train_lgbm")
+    log.info("cli.models.train_lgbm.start", folds=fold_list, n_trials=n_trials, horizon=horizon)
+
+    results = train_lgbm_walk_forward(
+        label_horizon=horizon,
+        n_trials=n_trials,
+        folds=fold_list,
+        feature_set_version=feature_set_version,
+        label_version=label_version,
+        n_shuffles=n_shuffles,
+    )
+    typer.echo(f"Trained {len(results)} folds.")
+
+    report = aggregate_fold_results(results)
+    typer.echo(render_summary(report))
+    out = write_report(report, Path(report_path))
+    typer.echo(f"\nReport written to: {out}")
+
+
+@models_app.command("evaluate-lgbm")
+def models_evaluate_lgbm(
+    report_path: str = typer.Option(
+        "reports/lgbm_v1_evaluation.json",
+        "--report-path",
+        help="Path to a previously written evaluation report JSON.",
+    ),
+) -> None:
+    """Pretty-print a previously written LightGBM evaluation report."""
+    p = Path(report_path)
+    if not p.exists():
+        typer.echo(f"No report at {p}. Run `kuri models train-lgbm` first.")
+        raise typer.Exit(code=1)
+    payload = pl.read_json(p)  # parse into a DataFrame just to validate JSON
+    del payload
+    import json
+
+    obj = json.loads(p.read_text(encoding="utf-8"))
+    # Print a compact view (avoid re-implementing render_summary on dicts).
+    typer.echo(f"Report: {p}")
+    typer.echo(f"  n_folds: {obj.get('n_folds')}")
+    decision = obj.get("decision", {})
+    typer.echo(
+        f"  aggregate test AUC: {decision.get('aggregate_test_auc')} "
+        f"(meets {decision.get('auc_threshold')}: {decision.get('auc_meets_threshold')})"
+    )
+    typer.echo(
+        f"  aggregate test IC : {decision.get('aggregate_test_ic')} "
+        f"(meets {decision.get('ic_threshold')}: {decision.get('ic_meets_threshold')})"
+    )
+    typer.echo(f"  PROCEED TO CHUNK 3: {decision.get('proceed_to_chunk_3')}")
+
+
+@models_app.command("compare-runs")
+def models_compare_runs(
+    last: int = typer.Option(10, "--last", help="Number of most recent runs to show."),
+    model_type: str = typer.Option("lgbm", "--model", help="Filter by model_type tag."),
+) -> None:
+    """Pull recent MLflow runs and print a summary table."""
+    from typing import Any
+
+    import mlflow
+
+    from trading.training.tracking import configure_tracking_store
+
+    configure_tracking_store()
+    mtype_filter = "lightgbm" if model_type == "lgbm" else model_type
+    # `output_format='pandas'` (default) returns a DataFrame; force it
+    # explicitly so mypy doesn't see the list-of-Run overload.
+    df: Any = mlflow.search_runs(
+        experiment_names=None,
+        filter_string=f"tags.model_type = '{mtype_filter}'",
+        max_results=last,
+        order_by=["start_time DESC"],
+        output_format="pandas",
+    )
+    if df.empty:
+        typer.echo(f"No MLflow runs found with model_type={mtype_filter!r}.")
+        raise typer.Exit(code=0)
+    cols = [
+        c
+        for c in df.columns
+        if c
+        in ("tags.fold_id", "metrics.test_auc_roc", "metrics.test_mean_ic", "start_time", "run_id")
+    ]
+    sub = df[cols].copy()
+    sub["start_time"] = sub["start_time"].astype(str).str[:19]
+    typer.echo(sub.to_string(index=False))
 
 
 if __name__ == "__main__":  # pragma: no cover

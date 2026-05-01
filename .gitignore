@@ -82,6 +82,10 @@ prefect.db-*
 mlruns/
 mlartifacts/
 
+# --- Trained model artifacts and evaluation reports (top-level only) ---
+/models/
+/reports/
+
 # --- Logs ---
 *.log
 *.jsonl
