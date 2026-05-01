@@ -1,5 +1,5 @@
-feature_set_version: 1
-n_features: 64
+feature_set_version: 2
+n_features: 74
 features:
 - name: ret_1d
   module: price
@@ -250,6 +250,50 @@ features:
   mask_on_special: keep
   description: 1 if adj_close above SMAs of all three windows (5, 20, 50); -1 if below
     all three; 0 otherwise.
+- name: trend_persistence_60d
+  module: trend
+  source: per_ticker
+  lookback_days: 80
+  input: adj_close
+  mask_on_special: keep
+  description: Fraction of the last 60 trading days where adj_close closed above its
+    own 20-day SMA. Captures sustained uptrend (~1) vs sustained downtrend (~0) vs
+    choppy regime (~0.5).
+- name: pct_days_above_sma200_252d
+  module: trend
+  source: per_ticker
+  lookback_days: 452
+  input: adj_close
+  mask_on_special: keep
+  description: Fraction of the last 252 trading days where adj_close closed above
+    its own 200-day SMA. Long-term trend regime indicator.
+- name: up_streak_length
+  module: trend
+  source: per_ticker
+  lookback_days: 21
+  input: adj_close
+  mask_on_special: keep
+  description: Number of consecutive up-days (ret_1d > 0) ending at this bar, capped
+    at 20. Resets to 0 on any day where ret_1d <= 0 or is null.
+- name: consecutive_days_above_sma50
+  module: trend
+  source: per_ticker
+  lookback_days: 51
+  input: adj_close
+  mask_on_special: keep
+  description: Number of consecutive trading days the current bar's adj_close has
+    stayed above its own 50-day SMA. 0 when below or during SMA-50 warmup. Encodes
+    time-since the most recent up-cross of the 50-day SMA in a way that doesn't require
+    explicit cross detection.
+- name: adx_directional_persistence
+  module: trend
+  source: per_ticker
+  lookback_days: 28
+  input: high,low,close
+  mask_on_special: keep
+  description: 'Signed ADX: adx_14 * sign(plus_di - minus_di). Captures trend strength
+    (ADX magnitude) and direction (DI sign) in a single value. Range roughly [-100,
+    +100].'
 - name: rsi_14
   module: momentum
   source: per_ticker
@@ -384,6 +428,44 @@ features:
   mask_on_special: mask
   description: '|close - open| / (high - low). Candle body size relative to full range.
     ~1 = wide-body day, ~0 = doji.'
+- name: trend_strength_smoothed
+  module: persistence
+  source: per_ticker
+  lookback_days: 61
+  input: open,high,low,close
+  mask_on_special: keep
+  description: Signed Heikin-Ashi trend duration. Counts consecutive bars in the same
+    HA-close direction (positive for up-runs, negative for down-runs). HA close =
+    (O+H+L+C)/4; days with zero HA-close change continue the prior direction. Capped
+    to [-60, +60].
+- name: roc_consistency_20d
+  module: persistence
+  source: per_ticker
+  lookback_days: 25
+  input: adj_close
+  mask_on_special: keep
+  description: Fraction of the last 20 trading days whose 5-day ROC has the same sign
+    as today's 5-day ROC. Captures whether recent momentum has been directionally
+    consistent (~1.0) or choppy (~0.5). Null when today's ROC is exactly 0.
+- name: volume_trend_alignment
+  module: persistence
+  source: per_ticker
+  lookback_days: 25
+  input: adj_close,volume
+  mask_on_special: mask
+  description: +1 if today's 5-day return is positive AND average volume on up-days
+    in the last 20 days exceeds that on down-days. -1 if 5-day return is negative
+    AND down-day volume exceeds up-day volume. 0 otherwise. Volume confirmation of
+    trend direction.
+- name: regime_adjusted_rsi
+  module: persistence
+  source: per_ticker
+  lookback_days: 266
+  input: adj_close
+  mask_on_special: keep
+  description: RSI(14) minus its own 252-day rolling median. Centers RSI in the stock's
+    recent regime so that a high value means overbought relative to its own typical
+    level, not a fixed 70.
 - name: ret_5d_rank_universe
   module: cross_sectional
   source: cross_sectional
@@ -472,3 +554,13 @@ features:
   mask_on_special: keep
   description: Rolling 60-bar mean pairwise correlation of daily returns across all
     tickers in the universe.
+- name: mean_reversion_strength_x_vix
+  module: interactions
+  source: cross_sectional
+  lookback_days: 252
+  input: ret_5d_z_winsor,vix_pct_252d
+  mask_on_special: keep
+  description: Cross-sectional z-score of 5-day return (ret_5d_z_winsor) multiplied
+    by the 252-day rolling percentile rank of India VIX (vix_pct_252d). Lets the model
+    see the strength of a stock's recent reversal signal scaled by where overall market
+    volatility sits in its recent range.

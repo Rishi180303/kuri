@@ -136,7 +136,11 @@ class FeatureConfig:
     mask_special_sessions: bool = True
 
     # Default feature_set_version for output paths. The pipeline overrides this.
-    feature_set_version: int = 1
+    # v1: original 63-feature set (Phase 2 baseline).
+    # v2: v1 + 9 trend-persistence / regime-adjusted features + 1 cross-feature
+    #     interaction (mean_reversion_strength_x_vix), added to address the
+    #     calm-bull regime-mismatch failures surfaced by the v1 LightGBM diagnostic.
+    feature_set_version: int = 2
 
     # Aliases collected here for convenience.
     extra: dict[str, object] = field(default_factory=dict)

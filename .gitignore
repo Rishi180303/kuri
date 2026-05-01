@@ -84,7 +84,11 @@ mlartifacts/
 
 # --- Trained model artifacts and evaluation reports (top-level only) ---
 /models/
-/reports/
+# Use /reports/* (not /reports/) so individual files inside can be unignored.
+# Per-fold reports are easy to regenerate; the v1 vs v2 comparison summary is
+# the durable artifact we keep in git.
+/reports/*
+!/reports/lgbm_v1_vs_v2_comparison.json
 
 # --- Logs ---
 *.log

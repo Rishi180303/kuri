@@ -23,6 +23,7 @@ set -uo pipefail
 
 HORIZON=20
 N_TRIALS=50
+FEATURE_VERSION="${FEATURE_VERSION:-1}"
 FOLDS=(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14)
 
 cd "$(dirname "$0")/.."
@@ -32,14 +33,15 @@ failed=()
 
 for fold in "${FOLDS[@]}"; do
     echo
-    echo "=== [$(date '+%H:%M:%S')] Starting fold ${fold} (horizon ${HORIZON}d, ${N_TRIALS} trials) ==="
-    report_path="reports/lgbm_v1_full_20d_fold_${fold}.json"
-    log_path="/tmp/lgbm_20d_full_fold_${fold}.log"
+    echo "=== [$(date '+%H:%M:%S')] Starting fold ${fold} (horizon ${HORIZON}d, ${N_TRIALS} trials, features v${FEATURE_VERSION}) ==="
+    report_path="reports/lgbm_v${FEATURE_VERSION}_full_20d_fold_${fold}.json"
+    log_path="/tmp/lgbm_v${FEATURE_VERSION}_20d_full_fold_${fold}.log"
     if uv run kuri models train-lgbm \
         --folds "${fold}" \
         --horizon "${HORIZON}" \
         --n-trials "${N_TRIALS}" \
         --n-shuffles 1000 \
+        --feature-version "${FEATURE_VERSION}" \
         --report-path "${report_path}" 2>&1 | tee "${log_path}"; then
         succeeded+=("$fold")
         echo "=== [$(date '+%H:%M:%S')] Fold ${fold} complete ==="
@@ -52,9 +54,10 @@ done
 echo
 echo "================================================================"
 echo "Full run complete at $(date '+%H:%M:%S')."
+echo "  Features:  v${FEATURE_VERSION}"
 echo "  Succeeded: ${succeeded[*]:-(none)}"
 echo "  Failed:    ${failed[*]:-(none)}"
-echo "  Reports:   reports/lgbm_v1_full_20d_fold_{0..14}.json"
+echo "  Reports:   reports/lgbm_v${FEATURE_VERSION}_full_20d_fold_{0..14}.json"
 echo "================================================================"
 
 if [[ ${#failed[@]} -gt 0 ]]; then

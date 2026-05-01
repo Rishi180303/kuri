@@ -130,6 +130,71 @@ def get_meta(cfg: FeatureConfig | None = None) -> list[FeatureMeta]:
                 f"({short}, {mid}, {long_}); -1 if below all three; 0 otherwise."
             ),
         ),
+        FeatureMeta(
+            name="trend_persistence_60d",
+            module=_MODULE,
+            source=FeatureSource.PER_TICKER,
+            lookback_days=80,  # 20 (SMA-20) + 60 (rolling fraction)
+            input_cols=("adj_close",),
+            mask_on_special=MaskPolicy.KEEP,
+            description=(
+                "Fraction of the last 60 trading days where adj_close closed "
+                "above its own 20-day SMA. Captures sustained uptrend (~1) vs "
+                "sustained downtrend (~0) vs choppy regime (~0.5)."
+            ),
+        ),
+        FeatureMeta(
+            name="pct_days_above_sma200_252d",
+            module=_MODULE,
+            source=FeatureSource.PER_TICKER,
+            lookback_days=452,  # 200 (SMA-200) + 252 (rolling fraction)
+            input_cols=("adj_close",),
+            mask_on_special=MaskPolicy.KEEP,
+            description=(
+                "Fraction of the last 252 trading days where adj_close closed "
+                "above its own 200-day SMA. Long-term trend regime indicator."
+            ),
+        ),
+        FeatureMeta(
+            name="up_streak_length",
+            module=_MODULE,
+            source=FeatureSource.PER_TICKER,
+            lookback_days=21,  # cap is 20, plus the row itself
+            input_cols=("adj_close",),
+            mask_on_special=MaskPolicy.KEEP,
+            description=(
+                "Number of consecutive up-days (ret_1d > 0) ending at this bar, "
+                "capped at 20. Resets to 0 on any day where ret_1d <= 0 or is null."
+            ),
+        ),
+        FeatureMeta(
+            name="consecutive_days_above_sma50",
+            module=_MODULE,
+            source=FeatureSource.PER_TICKER,
+            lookback_days=51,
+            input_cols=("adj_close",),
+            mask_on_special=MaskPolicy.KEEP,
+            description=(
+                "Number of consecutive trading days the current bar's adj_close "
+                "has stayed above its own 50-day SMA. 0 when below or during "
+                "SMA-50 warmup. Encodes time-since the most recent up-cross of "
+                "the 50-day SMA in a way that doesn't require explicit cross "
+                "detection."
+            ),
+        ),
+        FeatureMeta(
+            name="adx_directional_persistence",
+            module=_MODULE,
+            source=FeatureSource.PER_TICKER,
+            lookback_days=cfg.adx_window * 2,
+            input_cols=("high", "low", "close"),
+            mask_on_special=MaskPolicy.KEEP,
+            description=(
+                f"Signed ADX: adx_{cfg.adx_window} * sign(plus_di - minus_di). "
+                "Captures trend strength (ADX magnitude) and direction (DI sign) "
+                "in a single value. Range roughly [-100, +100]."
+            ),
+        ),
     ]
 
 
@@ -270,12 +335,25 @@ def compute(
     smoothed_minus = minus_dm.ewm_mean(alpha=alpha, adjust=False, min_samples=cfg.adx_window).over(
         "ticker"
     )
-    plus_di = 100.0 * smoothed_plus / smoothed_tr
-    minus_di = 100.0 * smoothed_minus / smoothed_tr
+    # Materialise plus_di and minus_di as columns so adx_directional_persistence
+    # can reuse them without recomputing the smoothing chain.
+    df = df.with_columns(
+        (100.0 * smoothed_plus / smoothed_tr).alias("_plus_di"),
+        (100.0 * smoothed_minus / smoothed_tr).alias("_minus_di"),
+    )
+    plus_di = pl.col("_plus_di")
+    minus_di = pl.col("_minus_di")
     di_sum = plus_di + minus_di
     dx = pl.when(di_sum > 0).then(100.0 * (plus_di - minus_di).abs() / di_sum).otherwise(0.0)
     adx = dx.ewm_mean(alpha=alpha, adjust=False, min_samples=cfg.adx_window).over("ticker")
     df = df.with_columns(adx.alias(f"adx_{cfg.adx_window}"))
+
+    # adx_directional_persistence: signed ADX
+    df = df.with_columns(
+        (pl.col(f"adx_{cfg.adx_window}") * (plus_di - minus_di).sign()).alias(
+            "adx_directional_persistence"
+        )
+    ).drop(["_plus_di", "_minus_di"])
 
     # ---------------- Aroon ----------------
     n = cfg.aroon_window
@@ -316,6 +394,58 @@ def compute(
         f"trend_aligned_{short}_{mid}_{long_}"
     )
     df = df.with_columns(aligned)
+
+    # ---------------- trend_persistence_60d ----------------
+    sma_20_for_persistence = adj.rolling_mean(window_size=20, min_samples=20).over("ticker")
+    above_sma_20 = (adj > sma_20_for_persistence).cast(pl.Float64)
+    df = df.with_columns(
+        above_sma_20.rolling_mean(window_size=60, min_samples=60)
+        .over("ticker")
+        .alias("trend_persistence_60d")
+    )
+
+    # ---------------- pct_days_above_sma200_252d ----------------
+    sma_200_for_persistence = adj.rolling_mean(window_size=200, min_samples=200).over("ticker")
+    above_sma_200 = (adj > sma_200_for_persistence).cast(pl.Float64)
+    df = df.with_columns(
+        above_sma_200.rolling_mean(window_size=252, min_samples=252)
+        .over("ticker")
+        .alias("pct_days_above_sma200_252d")
+    )
+
+    # ---------------- up_streak_length (consecutive up-days, cap 20) ----------------
+    # Each not-up day starts a new "segment"; within each (ticker, segment), the
+    # cumulative count of up-days is the streak length. cap at 20.
+    ret_1d_for_streak = adj / adj.shift(1).over("ticker") - 1.0
+    is_up = (ret_1d_for_streak > 0).cast(pl.Int32).fill_null(0)
+    df = df.with_columns(is_up.alias("_is_up"))
+    df = df.with_columns(
+        (1 - pl.col("_is_up")).cum_sum().over("ticker").alias("_streak_seg_id"),
+    )
+    df = df.with_columns(
+        pl.col("_is_up")
+        .cum_sum()
+        .over(["ticker", "_streak_seg_id"])
+        .clip(lower_bound=0, upper_bound=20)
+        .cast(pl.Int64)
+        .alias("up_streak_length")
+    ).drop(["_is_up", "_streak_seg_id"])
+
+    # ---------------- consecutive_days_above_sma50 ----------------
+    # Same segment trick as up_streak_length but on (adj > SMA-50). 0 below.
+    sma_50_for_streak = adj.rolling_mean(window_size=50, min_samples=50).over("ticker")
+    is_above_50 = (adj > sma_50_for_streak).cast(pl.Int32).fill_null(0)
+    df = df.with_columns(is_above_50.alias("_is_above_50"))
+    df = df.with_columns(
+        (1 - pl.col("_is_above_50")).cum_sum().over("ticker").alias("_above50_seg_id"),
+    )
+    df = df.with_columns(
+        pl.col("_is_above_50")
+        .cum_sum()
+        .over(["ticker", "_above50_seg_id"])
+        .cast(pl.Int64)
+        .alias("consecutive_days_above_sma50")
+    ).drop(["_is_above_50", "_above50_seg_id"])
 
     # ---------------- Supertrend (per-ticker numpy loop) ----------------
     st_col = f"supertrend_{cfg.supertrend_period}_{int(cfg.supertrend_multiplier)}"

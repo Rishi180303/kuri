@@ -34,8 +34,10 @@ from trading.config import (
 )
 from trading.features import (
     cross_sectional,
+    interactions,
     microstructure,
     momentum,
+    persistence,
     price,
     regime,
     trend,
@@ -54,7 +56,7 @@ from trading.storage import DataStore
 log = get_logger(__name__)
 
 
-PER_TICKER_MODULES = (price, volatility, trend, momentum, volume, microstructure)
+PER_TICKER_MODULES = (price, volatility, trend, momentum, volume, microstructure, persistence)
 INDEX_SYMBOLS = ("^NSEI", "^CRSLDX", "^INDIAVIX")
 
 
@@ -66,6 +68,7 @@ def all_metas(cfg: FeatureConfig | None = None) -> list[FeatureMeta]:
         metas.extend(mod.get_meta(cfg))
     metas.extend(cross_sectional.get_meta(cfg))
     metas.extend(regime.get_meta(cfg))
+    metas.extend(interactions.get_meta(cfg))
     return metas
 
 
@@ -221,7 +224,6 @@ class FeaturePipeline:
             cols=cs.width - 2,
             seconds=round(time.time() - t1, 2),
         )
-        per_ticker = per_ticker.join(cs, on=["date", "ticker"], how="left")
 
         # Regime (date-keyed only)
         log.info("features.compute.module.start", module="regime")
@@ -233,6 +235,21 @@ class FeaturePipeline:
             cols=regime_df.width - 1,
             seconds=round(time.time() - t2, 2),
         )
+
+        # Interactions (cross_sectional x regime). Joined into the cross-sectional
+        # frame so the interactions land alongside the cs columns when stitched
+        # into per_ticker.
+        log.info("features.compute.module.start", module="interactions")
+        t3 = time.time()
+        inter = interactions.compute(cs, regime_df, self.cfg)
+        log.info(
+            "features.compute.module.done",
+            module="interactions",
+            cols=inter.width - 2,
+            seconds=round(time.time() - t3, 2),
+        )
+        cs = cs.join(inter, on=["date", "ticker"], how="left")
+        per_ticker = per_ticker.join(cs, on=["date", "ticker"], how="left")
 
         # Apply special-session masking
         metas = all_metas(self.cfg)

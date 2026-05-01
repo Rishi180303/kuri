@@ -204,7 +204,7 @@ def features_compute(
     tickers: str | None = typer.Option(
         None, "--tickers", help="Comma-separated subset (default: full universe)."
     ),
-    version: int = typer.Option(1, "--version", help="Feature set version (output path)."),
+    version: int = typer.Option(2, "--version", help="Feature set version (output path)."),
 ) -> None:
     """Compute every feature for the universe and persist."""
     log = get_logger("cli.features.compute")
@@ -272,6 +272,8 @@ _INSPECT_CATEGORIES = (
     "microstructure",
     "cross_sectional",
     "regime",
+    "persistence",
+    "interactions",
 )
 
 
@@ -279,7 +281,7 @@ _INSPECT_CATEGORIES = (
 def features_inspect(
     ticker: str = typer.Argument(..., help="Ticker symbol to inspect."),
     n: int = typer.Option(10, "--n", help="Number of recent rows to display."),
-    version: int = typer.Option(1, "--version", help="Feature set version."),
+    version: int = typer.Option(2, "--version", help="Feature set version."),
     category: str = typer.Option(
         "all",
         "--category",
