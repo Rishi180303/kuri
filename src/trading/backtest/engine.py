@@ -25,7 +25,13 @@ from typing import Any
 import polars as pl
 
 from trading.backtest.portfolio import Portfolio
-from trading.backtest.types import CostModel, SlippageModel
+from trading.backtest.types import (
+    BacktestConfig,
+    BacktestResult,
+    CostModel,
+    PredictionsProvider,
+    SlippageModel,
+)
 
 
 def trading_days_in_window(
@@ -184,3 +190,236 @@ def execute_rebalance(
         )
 
     return trade_records
+
+
+def run_backtest(
+    predictions_provider: PredictionsProvider,
+    config: BacktestConfig,
+    universe_ohlcv: pl.DataFrame,
+    benchmark_ohlcv: dict[str, pl.DataFrame],
+    *,
+    cost_model: CostModel,
+    slippage_model: SlippageModel,
+) -> BacktestResult:
+    """Run the full backtest end-to-end.
+
+    Args:
+        predictions_provider: yields per-rebalance predictions, lookahead-safe.
+        config: knobs (initial capital, n_positions, frequency, dates, name).
+        universe_ohlcv: OHLCV frame for the trading universe.
+        benchmark_ohlcv: dict like
+            ``{"nifty50": <NSEI frame>, "ew_nifty49": <equal-weight series>}``.
+            "ew_nifty49" should be a frame with ``[date, total_value]`` already
+            net of costs+slippage (built upstream by ``simulate_equal_weight``).
+        cost_model, slippage_model: the same models the user injected via config.
+
+    Returns:
+        BacktestResult with portfolio_history, trade_log, rebalance_log, daily_returns.
+    """
+    # 1. Calendars
+    trading_days = trading_days_in_window(
+        universe_ohlcv, start=config.backtest_start, end=config.backtest_end
+    )
+    if not trading_days:
+        raise ValueError(f"No trading days in [{config.backtest_start}, {config.backtest_end}]")
+    schedule = build_rebalance_schedule(trading_days, freq_trading_days=config.rebalance_freq_days)
+
+    # 2. Pre-compute ADV per (date, ticker) for the universe
+    from trading.backtest.data import compute_adv_inr  # local import to avoid cycle
+
+    adv_frame = compute_adv_inr(universe_ohlcv, window=20)
+    adv_lookup: dict[tuple[date, str], float] = {
+        (d, t): v
+        for d, t, v in zip(
+            adv_frame["date"].to_list(),
+            adv_frame["ticker"].to_list(),
+            adv_frame["adv_inr"].to_list(),
+            strict=True,
+        )
+        if v is not None
+    }
+
+    # Pivot OHLCV to (date, ticker) -> adj_close lookup, and (date, ticker) -> close
+    close_lookup: dict[tuple[date, str], float] = {
+        (d, t): c
+        for d, t, c in zip(
+            universe_ohlcv["date"].to_list(),
+            universe_ohlcv["ticker"].to_list(),
+            universe_ohlcv["adj_close"].to_list(),
+            strict=True,
+        )
+    }
+
+    # 3. Initialize portfolio
+    portfolio = Portfolio(initial_capital=config.initial_capital)
+
+    # 4. Iterate trading days, rebalance on schedule, mark daily
+    rebalance_set = set(schedule)
+    portfolio_rows: list[dict[str, Any]] = []
+    rebalance_rows: list[dict[str, Any]] = []
+
+    for d in trading_days:
+        if d in rebalance_set:
+            preds = predictions_provider.predict_for(d)
+            day_close = {
+                t: close_lookup[(d, t)] for t in preds["ticker"].to_list() if (d, t) in close_lookup
+            }
+            day_adv = {t: adv_lookup.get((d, t), 0.0) for t in preds["ticker"].to_list()}
+
+            # Resolve fold_id for the rebalance log
+            fold_meta = predictions_provider._router.select_fold(d)  # type: ignore[attr-defined]
+
+            trade_records = execute_rebalance(
+                portfolio=portfolio,
+                rebalance_date=d,
+                predictions=preds,
+                close_prices=day_close,
+                adv_inr=day_adv,
+                n_positions=config.n_positions,
+                cost_model=cost_model,
+                slippage_model=slippage_model,
+                fold_id=fold_meta.fold_id,
+            )
+            picks = (
+                preds.sort("predicted_proba", descending=True)
+                .head(config.n_positions)["ticker"]
+                .to_list()
+            )
+            picked_probas = (
+                preds.sort("predicted_proba", descending=True)
+                .head(config.n_positions)["predicted_proba"]
+                .to_list()
+            )
+            rebalance_rows.append(
+                {
+                    "date": d,
+                    "fold_id_used": fold_meta.fold_id,
+                    "fold_train_end": fold_meta.train_end,
+                    "n_picks": len(picks),
+                    "picks": ",".join(picks),
+                    "predicted_probas": ",".join(f"{p:.4f}" for p in picked_probas),
+                    "n_trades": len(trade_records),
+                    "n_problematic_trades": sum(1 for r in trade_records if r["flag_problematic"]),
+                    "total_cost_inr": sum(r["cost_inr"] for r in trade_records),
+                }
+            )
+
+        # Daily mark — every day, including rebalance days (post-trade NAV)
+        held = [t for t, s in portfolio.positions.items() if s != 0.0]
+        mark_prices = {}
+        for t in held:
+            if (d, t) in close_lookup:
+                mark_prices[t] = close_lookup[(d, t)]
+            else:
+                # Stock has no quote on this date — carry forward last known
+                # price. For Nifty 50 stocks this happens only on muhurat /
+                # special-session edge cases; using yesterday's price is a
+                # reasonable approximation.
+                last = next(
+                    (
+                        close_lookup[(prev, t)]
+                        for prev in reversed(trading_days)
+                        if prev <= d and (prev, t) in close_lookup
+                    ),
+                    None,
+                )
+                if last is None:
+                    raise KeyError(f"no historical close for held {t!r} as of {d}")
+                mark_prices[t] = last
+        equity = portfolio.total_equity(mark_prices)
+        portfolio_rows.append(
+            {
+                "date": d,
+                "total_value": equity,
+                "cash": portfolio.cash,
+                "n_positions": len(held),
+                "gross_value": equity - portfolio.cash,
+            }
+        )
+
+    portfolio_history = pl.DataFrame(portfolio_rows)
+    trade_log = portfolio.trade_log_dataframe()
+    rebalance_log = pl.DataFrame(rebalance_rows) if rebalance_rows else pl.DataFrame()
+
+    # 5. Build daily_returns frame: strategy + benchmarks
+    daily_ret = (
+        portfolio_history.sort("date")
+        .with_columns(
+            (pl.col("total_value").pct_change()).alias("strategy_ret"),
+        )
+        .select(["date", "strategy_ret"])
+    )
+    for name, bench_df in benchmark_ohlcv.items():
+        bench_ret = (
+            bench_df.sort("date")
+            .with_columns((pl.col("total_value").pct_change()).alias(f"{name}_ret"))
+            .select(["date", f"{name}_ret"])
+        )
+        daily_ret = daily_ret.join(bench_ret, on="date", how="left")
+
+    return BacktestResult(
+        config=config,
+        portfolio_history=portfolio_history,
+        trade_log=trade_log,
+        rebalance_log=rebalance_log,
+        daily_returns=daily_ret,
+        metrics={},  # populated by metrics.compute_all_metrics in Task 13
+    )
+
+
+def simulate_equal_weight_benchmark(
+    universe_ohlcv: pl.DataFrame,
+    *,
+    backtest_start: date,
+    backtest_end: date,
+    initial_capital: float,
+    rebalance_freq_days: int,
+    cost_model: CostModel,
+    slippage_model: SlippageModel,
+) -> pl.DataFrame:
+    """Equal-weight benchmark across the trading universe.
+
+    Same cost+slippage model as the strategy. Reuses ``run_backtest``
+    with a constant-prediction provider that puts every ticker at 1.0 —
+    top-N selection then degenerates to "first N alphabetically", but
+    since N == universe size we hold everything equal-weight."""
+
+    universe = sorted(universe_ohlcv["ticker"].unique().to_list())
+
+    class _ConstantProvider:
+        def predict_for(self, rebalance_date: date) -> pl.DataFrame:
+            return pl.DataFrame({"ticker": universe, "predicted_proba": [1.0] * len(universe)})
+
+        # Stub _router so run_backtest's fold_id lookup is satisfied
+        class _StubRouter:
+            def select_fold(self, d: date) -> Any:
+                from pathlib import Path
+
+                from trading.backtest.walk_forward_sim import FoldMeta
+
+                return FoldMeta(
+                    fold_id=-1,
+                    train_start=date(1900, 1, 1),
+                    train_end=date(1900, 1, 1),
+                    model_path=Path("/equal-weight-stub"),
+                )
+
+        _router = _StubRouter()
+
+    cfg = BacktestConfig(
+        backtest_start=backtest_start,
+        backtest_end=backtest_end,
+        initial_capital=initial_capital,
+        n_positions=len(universe),
+        rebalance_freq_days=rebalance_freq_days,
+        name="ew_nifty49",
+    )
+    result = run_backtest(
+        predictions_provider=_ConstantProvider(),
+        config=cfg,
+        universe_ohlcv=universe_ohlcv,
+        benchmark_ohlcv={},  # no benchmarks for the benchmark itself
+        cost_model=cost_model,
+        slippage_model=slippage_model,
+    )
+    return result.portfolio_history.select(["date", "total_value"])
