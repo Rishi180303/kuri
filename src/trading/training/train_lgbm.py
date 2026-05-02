@@ -374,6 +374,8 @@ def train_lgbm_walk_forward(
     seed: int = 42,
     train_start: date = date(2018, 4, 2),
     initial_train_end: date = date(2021, 12, 31),
+    model_dir: Path | None = None,
+    optuna_db_dir: Path | None = None,
 ) -> dict[int, FoldResult]:
     """Run the LightGBM walk-forward across all (or selected) folds.
 
@@ -386,6 +388,13 @@ def train_lgbm_walk_forward(
         n_shuffles: permutation count for the shuffle-baseline IC.
         seed: TPE sampler + shuffle baseline seed.
         train_start, initial_train_end: walk-forward window anchors.
+        model_dir: where to write per-fold model artifacts. Defaults to
+            ``models/v1/lgbm`` for production runs. **Tests MUST pass a
+            tmp_path** so the production fold artifacts are not silently
+            overwritten by a test side-effect.
+        optuna_db_dir: where to persist Optuna study DBs. Defaults to
+            ``<data_dir>/optuna`` for production runs. **Tests MUST pass a
+            tmp_path.**
     """
     log = get_run_logger()
     cfg = get_pipeline_config()
@@ -408,8 +417,10 @@ def train_lgbm_walk_forward(
         splits = [s for s in splits if s.fold_id in wanted]
     log.info(f"will train {len(splits)} folds: {[s.fold_id for s in splits]}")
 
-    optuna_db_dir = Path(cfg.paths.data_dir) / "optuna"
-    model_dir = Path("models") / "v1" / "lgbm"
+    if optuna_db_dir is None:
+        optuna_db_dir = Path(cfg.paths.data_dir) / "optuna"
+    if model_dir is None:
+        model_dir = Path("models") / "v1" / "lgbm"
 
     results: dict[int, FoldResult] = {}
     for split in splits:
