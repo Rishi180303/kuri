@@ -1,0 +1,16 @@
+SPOT CHECK PASSED — rebalance_date=2024-06-18  fold_id=9
+Top-10 ticker set: ['ASIANPAINT', 'BEL', 'BHARTIARTL', 'COALINDIA', 'HINDALCO', 'ITC', 'NTPC', 'ONGC', 'POWERGRID', 'TATASTEEL']
+Order check: same order
+Proba check: probas matched within 5e-4 (4dp rounding)
+
+Engine picks (ordered)    :
+   1. ITC                   engine=0.5509  repro=0.5509
+   2. COALINDIA             engine=0.5297  repro=0.5297
+   3. HINDALCO              engine=0.5297  repro=0.5297
+   4. TATASTEEL             engine=0.5297  repro=0.5297
+   5. NTPC                  engine=0.5255  repro=0.5255
+   6. BEL                   engine=0.5253  repro=0.5253
+   7. ONGC                  engine=0.5191  repro=0.5191
+   8. BHARTIARTL            engine=0.5137  repro=0.5137
+   9. ASIANPAINT            engine=0.5133  repro=0.5133
+  10. POWERGRID             engine=0.5132  repro=0.5132
