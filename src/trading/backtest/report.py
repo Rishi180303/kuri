@@ -10,10 +10,24 @@ import json
 from pathlib import Path
 from typing import Any
 
+import matplotlib
+
+matplotlib.use("Agg")  # headless — must be set before pyplot import
+import matplotlib.pyplot as plt
+import numpy as np
 import polars as pl
 
 from trading.backtest.metrics import compute_all_metrics
 from trading.backtest.types import BacktestResult
+
+# Black/grey/blue palette (avoid garish colors)
+_PALETTE: dict[str, str] = {
+    "strategy": "#1f3b73",  # deep blue
+    "nifty50": "#404040",  # dark grey
+    "ew_nifty49": "#7a7a7a",  # mid grey
+    "drawdown": "#1f3b73",
+    "drawdown_fill": "#aab5d3",
+}
 
 
 def render_headline_table(
@@ -128,3 +142,125 @@ def write_primary_headline(
         encoding="utf-8",
     )
     return md_path
+
+
+def plot_equity_curve(
+    strategy_history: pl.DataFrame,
+    benchmark_histories: dict[str, pl.DataFrame],
+    output_path: Path,
+    *,
+    title: str = "Strategy vs benchmarks",
+) -> None:
+    """PNG @ 150 DPI of equity curves, all rebased to 1.0 at first common date."""
+    fig, ax = plt.subplots(figsize=(10, 5), dpi=150)
+
+    s = strategy_history.sort("date")
+    s_vals = s["total_value"].to_numpy()
+    s_norm = s_vals / s_vals[0]
+    ax.plot(
+        s["date"].to_list(),
+        s_norm,
+        label="strategy",
+        color=_PALETTE["strategy"],
+        lw=1.8,
+    )
+
+    for name, h in benchmark_histories.items():
+        b = h.sort("date")
+        b_vals = b["total_value"].to_numpy()
+        b_norm = b_vals / b_vals[0]
+        color = _PALETTE.get(name, "#888888")
+        ax.plot(b["date"].to_list(), b_norm, label=name, color=color, lw=1.2)
+
+    ax.set_xlabel("date")
+    ax.set_ylabel("equity (rebased to 1.0)")
+    ax.set_title(title)
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_drawdown(
+    strategy_history: pl.DataFrame,
+    output_path: Path,
+    *,
+    title: str = "Strategy underwater",
+) -> None:
+    """PNG @ 150 DPI showing running drawdown (%) from equity peak."""
+    fig, ax = plt.subplots(figsize=(10, 4), dpi=150)
+
+    h = strategy_history.sort("date")
+    equity = h["total_value"].to_numpy()
+    running_max = np.maximum.accumulate(equity)
+    dd_pct = (equity - running_max) / running_max * 100
+
+    dates = h["date"].to_list()
+    ax.fill_between(dates, dd_pct, 0, color=_PALETTE["drawdown_fill"], alpha=0.6)
+    ax.plot(dates, dd_pct, color=_PALETTE["drawdown"], lw=1.0)
+    ax.axhline(0, color="black", lw=0.5)
+    ax.set_xlabel("date")
+    ax.set_ylabel("drawdown (%)")
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_monthly_returns_heatmap(
+    strategy_history: pl.DataFrame,
+    output_path: Path,
+    *,
+    title: str = "Monthly returns",
+) -> None:
+    """PNG @ 150 DPI heatmap of compounded monthly returns (%).
+
+    The first row in `strategy_history` has a null pct_change; we drop that
+    row before compounding so partial first/last months are included but do
+    not produce NaN cells — they simply reflect fewer trading days that month.
+    """
+    h = (
+        strategy_history.sort("date")
+        .with_columns(pl.col("total_value").pct_change().alias("ret"))
+        .drop_nulls("ret")
+    )
+
+    monthly = (
+        h.with_columns(
+            pl.col("date").dt.year().alias("year"),
+            pl.col("date").dt.month().alias("month"),
+        )
+        .group_by(["year", "month"])
+        .agg(((pl.col("ret") + 1.0).product() - 1.0).alias("monthly_ret"))
+        .sort(["year", "month"])
+    )
+
+    # polars 1.18+: pivot(on=, index=, values=)
+    pivot = monthly.pivot(
+        on="month",
+        index="year",
+        values="monthly_ret",
+    ).sort("year")
+
+    years = pivot["year"].to_list()
+    month_cols = [c for c in pivot.columns if c != "year"]
+    matrix = pivot.select(month_cols).to_numpy(allow_copy=True).astype(float)
+
+    n_years = len(years)
+    fig_height = max(3, n_years * 0.5)
+    fig, ax = plt.subplots(figsize=(10, fig_height), dpi=150)
+
+    im = ax.imshow(matrix * 100, cmap="RdBu_r", vmin=-10, vmax=10, aspect="auto")
+    ax.set_yticks(range(n_years))
+    ax.set_yticklabels([str(y) for y in years])
+    ax.set_xticks(range(len(month_cols)))
+    ax.set_xticklabels([str(m) for m in month_cols])
+    ax.set_xlabel("month")
+    ax.set_ylabel("year")
+    ax.set_title(title)
+    fig.colorbar(im, ax=ax, label="monthly return (%)")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
