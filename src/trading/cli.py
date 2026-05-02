@@ -803,5 +803,101 @@ def backtest_run(
     typer.echo(f"Logs written to {out_dir}/")
 
 
+@backtest_app.command("sensitivity")
+def backtest_sensitivity(
+    start: str = typer.Option("2022-07-04", "--start"),
+    end: str = typer.Option("2026-04-01", "--end"),
+    output_dir: str = typer.Option("reports/backtest_v2", "--output-dir"),
+) -> None:
+    """Run primary + 6 sensitivity scenarios and write a comparison table."""
+    import json as _json
+    from datetime import date
+
+    from trading.backtest.data import load_index_ohlcv, load_universe_ohlcv
+    from trading.backtest.report import run_sensitivity_sweep
+    from trading.backtest.types import BacktestConfig
+    from trading.backtest.walk_forward_sim import (
+        FoldRouter,
+        StitchedPredictionsProvider,
+    )
+    from trading.training.data import load_training_data
+
+    start_d = parse_iso_date(start)
+    end_d = parse_iso_date(end)
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    universe_ohlcv = load_universe_ohlcv(start=date(2018, 1, 1), end=end_d)
+    nsei = load_index_ohlcv("NSEI", start=start_d, end=end_d)
+    nifty_history = nsei.with_columns(
+        (pl.col("adj_close") / pl.col("adj_close").first() * 1_000_000.0).alias("total_value")
+    ).select(["date", "total_value"])
+
+    feature_frame = load_training_data(
+        start=date(2021, 12, 1),
+        end=end_d,
+        horizons=(20,),
+        feature_version=2,
+        label_version=1,
+        drop_label_nulls=False,
+    )
+    universe = sorted(feature_frame["ticker"].unique().to_list())
+    router = FoldRouter.from_disk(Path("models/v1/lgbm"), embargo_days=5)
+    provider = StitchedPredictionsProvider(router, feature_frame, universe)
+
+    base_cfg = BacktestConfig(
+        backtest_start=start_d,
+        backtest_end=end_d,
+        n_positions=10,
+        rebalance_freq_days=20,
+        name="primary",
+    )
+
+    # Note: don't pre-filter universe_ohlcv — pass full warmup per Task 15 lesson.
+    out = run_sensitivity_sweep(
+        base_config=base_cfg,
+        universe_ohlcv=universe_ohlcv,
+        nifty_history=nifty_history,
+        provider=provider,
+    )
+
+    sens_path = out_dir / "sensitivity.json"
+    sens_path.write_text(_json.dumps(out, indent=2, default=str), encoding="utf-8")
+
+    # Markdown comparison table
+    md_path = out_dir / "sensitivity.md"
+    md = ["# Phase 4 — sensitivity sweep", ""]
+    md.append(
+        "Single-variable changes from primary config. alpha columns from OLS daily-returns regression."
+    )
+    md.append("")
+    md.append(
+        "| scenario | CAGR | Sharpe | MaxDD | alpha vs EW | p(alpha/EW) | alpha vs Nifty 50 | p(alpha/Nifty50) | total cost (INR) | n rebalances |"
+    )
+    md.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    for name, m in out.items():
+        md.append(
+            f"| {name} | {m['cagr']*100:+.2f}% | {m['sharpe']:.2f} | {m['max_drawdown']*100:+.2f}% "
+            f"| {m['alpha_annualized_vs_ew']*100:+.2f}% | {m['alpha_pvalue_vs_ew']:.3f} "
+            f"| {m['alpha_annualized_vs_nifty']*100:+.2f}% | {m['alpha_pvalue_vs_nifty']:.3f} "
+            f"| {m['total_cost_inr']:,.0f} | {m['n_rebalances']:.0f} |"
+        )
+    md_path.write_text("\n".join(md) + "\n", encoding="utf-8")
+
+    typer.echo(f"Sensitivity sweep ({len(out)} scenarios) written to {sens_path}")
+    typer.echo(f"Markdown comparison: {md_path}")
+
+    # Stdout: short table
+    typer.echo("")
+    cols = ["scenario", "CAGR", "Sharpe", "alpha vs EW", "alpha vs Nifty50"]
+    typer.echo(" | ".join(f"{c:>14s}" for c in cols))
+    typer.echo("-" * 80)
+    for name, m in out.items():
+        typer.echo(
+            f"{name:>14s} | {m['cagr']*100:>+13.2f}% | {m['sharpe']:>13.2f} "
+            f"| {m['alpha_annualized_vs_ew']*100:>+13.2f}% | {m['alpha_annualized_vs_nifty']*100:>+13.2f}%"
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

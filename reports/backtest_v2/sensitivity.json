@@ -1,0 +1,79 @@
+{
+  "primary": {
+    "cagr": 0.2762449922530148,
+    "sharpe": 1.2242707660450989,
+    "max_drawdown": -0.1748901594889311,
+    "alpha_annualized_vs_ew": 0.057158566242417705,
+    "alpha_pvalue_vs_ew": 0.16920698258968025,
+    "alpha_annualized_vs_nifty": 0.146611488325629,
+    "alpha_pvalue_vs_nifty": 0.0029345086036984824,
+    "total_cost_inr": 120495.81937973041,
+    "n_rebalances": 47.0
+  },
+  "n5": {
+    "cagr": 0.39549074483505975,
+    "sharpe": 1.5936345814758544,
+    "max_drawdown": -0.14221192251531084,
+    "alpha_annualized_vs_ew": 0.1515725586610398,
+    "alpha_pvalue_vs_ew": 0.013762165183470065,
+    "alpha_annualized_vs_nifty": 0.2404718953084609,
+    "alpha_pvalue_vs_nifty": 0.00032730745881970336,
+    "total_cost_inr": 166086.8438933405,
+    "n_rebalances": 47.0
+  },
+  "n15": {
+    "cagr": 0.2696648544161311,
+    "sharpe": 1.2599493283401793,
+    "max_drawdown": -0.1537711623033806,
+    "alpha_annualized_vs_ew": 0.05148678549266268,
+    "alpha_pvalue_vs_ew": 0.0903114649521557,
+    "alpha_annualized_vs_nifty": 0.13917332625872708,
+    "alpha_pvalue_vs_nifty": 0.00033611163871727356,
+    "total_cost_inr": 94949.26182594975,
+    "n_rebalances": 47.0
+  },
+  "freq5": {
+    "cagr": 0.24762420828731502,
+    "sharpe": 1.0811207425973794,
+    "max_drawdown": -0.17675047958562654,
+    "alpha_annualized_vs_ew": 0.03425393241669105,
+    "alpha_pvalue_vs_ew": 0.40631218229999355,
+    "alpha_annualized_vs_nifty": 0.12330136057575865,
+    "alpha_pvalue_vs_nifty": 0.012220483721623765,
+    "total_cost_inr": 315702.153809843,
+    "n_rebalances": 185.0
+  },
+  "freq60": {
+    "cagr": 0.27502888773294787,
+    "sharpe": 1.1705840729234418,
+    "max_drawdown": -0.16130795627964117,
+    "alpha_annualized_vs_ew": 0.046455499624898616,
+    "alpha_pvalue_vs_ew": 0.2540005632969846,
+    "alpha_annualized_vs_nifty": 0.13987526374701736,
+    "alpha_pvalue_vs_nifty": 0.005141420256437268,
+    "total_cost_inr": 42836.50461183783,
+    "n_rebalances": 16.0
+  },
+  "slip2x": {
+    "cagr": 0.25725912787646976,
+    "sharpe": 1.1293782592542134,
+    "max_drawdown": -0.17757630288433968,
+    "alpha_annualized_vs_ew": 0.04256443412479843,
+    "alpha_pvalue_vs_ew": 0.30928970590671123,
+    "alpha_annualized_vs_nifty": 0.13152946092076404,
+    "alpha_pvalue_vs_nifty": 0.007933596978057178,
+    "total_cost_inr": 169310.33654438108,
+    "n_rebalances": 47.0
+  },
+  "brokerage20": {
+    "cagr": 0.2728533828643487,
+    "sharpe": 1.2074442293032162,
+    "max_drawdown": -0.17565311556736757,
+    "alpha_annualized_vs_ew": 0.0647853723176809,
+    "alpha_pvalue_vs_ew": 0.1184312503620657,
+    "alpha_annualized_vs_nifty": 0.14392697681783545,
+    "alpha_pvalue_vs_nifty": 0.0035210011842281563,
+    "total_cost_inr": 137261.67246604396,
+    "n_rebalances": 47.0
+  }
+}

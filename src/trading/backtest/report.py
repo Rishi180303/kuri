@@ -6,6 +6,7 @@ report land in Tasks 17+ post-approval."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from dataclasses import dataclass
@@ -20,8 +21,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 
-from trading.backtest.metrics import compute_all_metrics
-from trading.backtest.types import BacktestResult
+from trading.backtest.metrics import alpha_beta_pvalue, compute_all_metrics
+from trading.backtest.types import (
+    BacktestConfig,
+    BacktestResult,
+    CostModel,
+    PredictionsProvider,
+    SlippageModel,
+)
 
 # Black/grey/blue palette (avoid garish colors)
 _PALETTE: dict[str, str] = {
@@ -367,3 +374,158 @@ def plot_monthly_returns_heatmap(
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Sensitivity sweep
+# ---------------------------------------------------------------------------
+
+_TRADING_DAYS_PER_YEAR = 252
+
+
+def _returns_from_history(history: pl.DataFrame) -> np.ndarray:
+    """Extract daily returns (decimal) from a [date, total_value] frame."""
+    h = history.sort("date")
+    return np.asarray(h["total_value"].pct_change().to_numpy(), dtype=float)
+
+
+def _align_returns(
+    strategy_history: pl.DataFrame, bench_history: pl.DataFrame
+) -> tuple[np.ndarray, np.ndarray]:
+    """Inner-join on date, return aligned daily return arrays."""
+    merged = (
+        strategy_history.select(["date", "total_value"])
+        .rename({"total_value": "s"})
+        .join(
+            bench_history.select(["date", "total_value"]).rename({"total_value": "b"}),
+            on="date",
+            how="inner",
+        )
+        .sort("date")
+    )
+    s_rets = np.asarray(merged["s"].pct_change().to_numpy(), dtype=float)
+    b_rets = np.asarray(merged["b"].pct_change().to_numpy(), dtype=float)
+    return s_rets, b_rets
+
+
+def _scenario_metrics(
+    result: BacktestResult,
+    ew_history: pl.DataFrame,
+    nifty_history: pl.DataFrame,
+) -> dict[str, float]:
+    """Compute the flat metric dict for one scenario result."""
+    base_metrics = compute_all_metrics(
+        portfolio_history=result.portfolio_history,
+        benchmark_history=nifty_history,
+        risk_free_rate=result.config.risk_free_rate,
+    )
+
+    # alpha vs EW (OLS regression on aligned daily returns)
+    s_rets_ew, ew_rets = _align_returns(result.portfolio_history, ew_history)
+    alpha_daily_ew, _beta_ew, p_ew = alpha_beta_pvalue(s_rets_ew, ew_rets)
+    alpha_ann_ew = (
+        float(alpha_daily_ew) * _TRADING_DAYS_PER_YEAR
+        if np.isfinite(alpha_daily_ew)
+        else float("nan")
+    )
+
+    # alpha vs Nifty 50 — already computed by compute_all_metrics above, but we
+    # replicate the OLS call here so both alpha columns come from the same code path.
+    s_rets_n, n_rets = _align_returns(result.portfolio_history, nifty_history)
+    alpha_daily_n, _beta_n, p_n = alpha_beta_pvalue(s_rets_n, n_rets)
+    alpha_ann_n = (
+        float(alpha_daily_n) * _TRADING_DAYS_PER_YEAR
+        if np.isfinite(alpha_daily_n)
+        else float("nan")
+    )
+
+    total_cost_inr = float(result.trade_log["cost_inr"].sum() or 0.0)
+    n_rebalances = float(result.rebalance_log.height)
+
+    return {
+        "cagr": base_metrics["cagr"],
+        "sharpe": base_metrics["sharpe"],
+        "max_drawdown": base_metrics["max_drawdown"],
+        "alpha_annualized_vs_ew": alpha_ann_ew,
+        "alpha_pvalue_vs_ew": p_ew,
+        "alpha_annualized_vs_nifty": alpha_ann_n,
+        "alpha_pvalue_vs_nifty": p_n,
+        "total_cost_inr": total_cost_inr,
+        "n_rebalances": n_rebalances,
+    }
+
+
+def run_sensitivity_sweep(
+    base_config: BacktestConfig,
+    universe_ohlcv: pl.DataFrame,
+    nifty_history: pl.DataFrame,
+    provider: PredictionsProvider,
+) -> dict[str, dict[str, float]]:
+    """Run primary + 6 sensitivity scenarios, return metrics dict per scenario.
+
+    The same ``provider`` instance is passed to every ``run_backtest`` call so
+    its internal model cache is reused across all 7 scenarios — models load once
+    per fold instead of 7 times.
+
+    Scenarios:
+        primary    — baseline, no changes
+        n5         — n_positions = 5
+        n15        — n_positions = 15
+        freq5      — rebalance_freq_days = 5
+        freq60     — rebalance_freq_days = 60
+        slip2x     — ADVBasedSlippage with all buckets doubled
+        brokerage20 — FlatBrokerageDeliveryCosts (20 INR flat per trade)
+    """
+    from trading.backtest.costs import FlatBrokerageDeliveryCosts, IndianDeliveryCosts
+    from trading.backtest.engine import run_backtest, simulate_equal_weight_benchmark
+    from trading.backtest.slippage import ADVBasedSlippage
+
+    default_cost: CostModel = IndianDeliveryCosts()
+    default_slip: SlippageModel = ADVBasedSlippage()
+    slip2x: SlippageModel = ADVBasedSlippage(
+        bps_under_0_1=10,
+        bps_0_1_to_0_5=20,
+        bps_0_5_to_1_0=40,
+        bps_over_1_0=100,
+    )
+    broker20_cost: CostModel = FlatBrokerageDeliveryCosts()
+
+    # Scenarios: (name, config_overrides_dict, cost_model, slippage_model, rerun_ew)
+    # rerun_ew=True for scenarios that change cost/slippage (slip2x, brokerage20).
+    scenarios: list[tuple[str, dict[str, Any], CostModel, SlippageModel, bool]] = [
+        ("primary", {}, default_cost, default_slip, True),
+        ("n5", {"n_positions": 5}, default_cost, default_slip, True),
+        ("n15", {"n_positions": 15}, default_cost, default_slip, True),
+        ("freq5", {"rebalance_freq_days": 5}, default_cost, default_slip, True),
+        ("freq60", {"rebalance_freq_days": 60}, default_cost, default_slip, True),
+        ("slip2x", {}, default_cost, slip2x, True),
+        ("brokerage20", {}, broker20_cost, default_slip, True),
+    ]
+
+    results: dict[str, dict[str, float]] = {}
+
+    for scenario_name, overrides, cost_model, slippage_model, _rerun_ew in scenarios:
+        scenario_config = dataclasses.replace(base_config, name=scenario_name, **overrides)
+
+        ew_history = simulate_equal_weight_benchmark(
+            universe_ohlcv=universe_ohlcv,
+            backtest_start=scenario_config.backtest_start,
+            backtest_end=scenario_config.backtest_end,
+            initial_capital=scenario_config.initial_capital,
+            rebalance_freq_days=scenario_config.rebalance_freq_days,
+            cost_model=cost_model,
+            slippage_model=slippage_model,
+        )
+
+        result = run_backtest(
+            predictions_provider=provider,
+            config=scenario_config,
+            universe_ohlcv=universe_ohlcv,
+            benchmark_ohlcv={"nifty50": nifty_history, "ew_nifty49": ew_history},
+            cost_model=cost_model,
+            slippage_model=slippage_model,
+        )
+
+        results[scenario_name] = _scenario_metrics(result, ew_history, nifty_history)
+
+    return results
