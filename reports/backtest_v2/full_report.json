@@ -1,0 +1,267 @@
+{
+  "config": {
+    "name": "primary",
+    "backtest_start": "2022-07-04",
+    "backtest_end": "2026-04-01",
+    "initial_capital": 1000000.0,
+    "n_positions": 10,
+    "rebalance_freq_days": 20,
+    "universe_size": 49
+  },
+  "headline_metrics": {
+    "strategy": {
+      "total_return": 1.4458220369886976,
+      "cagr": 0.2762449922530148,
+      "annualized_vol": 0.16254931027872807,
+      "sharpe": 1.2242707660450989,
+      "sortino": 1.1646191585589518,
+      "max_drawdown": -0.1748901594889311,
+      "max_drawdown_duration": 183.0,
+      "calmar": 1.579534223424952,
+      "alpha_annualized": 0.146611488325629,
+      "beta": 1.045147931495285,
+      "alpha_pvalue": 0.0029345086036984824,
+      "information_ratio": 1.6093051520245971
+    },
+    "ew_nifty49": {
+      "total_return": 0.9014521136326659,
+      "cagr": 0.19155528695579815,
+      "annualized_vol": 0.1302419969290685,
+      "sharpe": 0.96387203603491,
+      "sortino": 0.9008477777497731,
+      "max_drawdown": -0.17786456627293065,
+      "max_drawdown_duration": 280.0,
+      "calmar": 1.0769727268884983,
+      "alpha_annualized": 0.08026712004109698,
+      "beta": 0.9772942752628065,
+      "alpha_pvalue": 0.00011251957369196042,
+      "information_ratio": 1.9648542366718098
+    },
+    "nifty50": {
+      "total_return": 0.4322008007450695,
+      "cagr": 0.10304344324295012,
+      "annualized_vol": 0.12691915383031133,
+      "sharpe": 0.37723985013248545,
+      "sortino": 0.360528907311606,
+      "max_drawdown": -0.1576667830374075,
+      "max_drawdown_duration": 314.0,
+      "calmar": 0.6535520117671353,
+      "alpha_annualized": null,
+      "beta": null,
+      "alpha_pvalue": null,
+      "information_ratio": null
+    }
+  },
+  "alpha": {
+    "vs_nifty50": {
+      "alpha_annualized": 0.1466,
+      "p_value": 0.0029,
+      "beta": 1.0451
+    },
+    "vs_ew_nifty49": {
+      "alpha_annualized": 0.0572,
+      "p_value": 0.1692,
+      "beta": 1.0887
+    }
+  },
+  "sensitivity": {
+    "primary": {
+      "cagr": 0.2762449922530148,
+      "sharpe": 1.2242707660450989,
+      "max_drawdown": -0.1748901594889311,
+      "alpha_annualized_vs_ew": 0.057158566242417705,
+      "alpha_pvalue_vs_ew": 0.16920698258968025,
+      "alpha_annualized_vs_nifty": 0.146611488325629,
+      "alpha_pvalue_vs_nifty": 0.0029345086036984824,
+      "total_cost_inr": 120495.81937973041,
+      "n_rebalances": 47.0
+    },
+    "n5": {
+      "cagr": 0.39549074483505975,
+      "sharpe": 1.5936345814758544,
+      "max_drawdown": -0.14221192251531084,
+      "alpha_annualized_vs_ew": 0.1515725586610398,
+      "alpha_pvalue_vs_ew": 0.013762165183470065,
+      "alpha_annualized_vs_nifty": 0.2404718953084609,
+      "alpha_pvalue_vs_nifty": 0.00032730745881970336,
+      "total_cost_inr": 166086.8438933405,
+      "n_rebalances": 47.0
+    },
+    "n15": {
+      "cagr": 0.2696648544161311,
+      "sharpe": 1.2599493283401793,
+      "max_drawdown": -0.1537711623033806,
+      "alpha_annualized_vs_ew": 0.05148678549266268,
+      "alpha_pvalue_vs_ew": 0.0903114649521557,
+      "alpha_annualized_vs_nifty": 0.13917332625872708,
+      "alpha_pvalue_vs_nifty": 0.00033611163871727356,
+      "total_cost_inr": 94949.26182594975,
+      "n_rebalances": 47.0
+    },
+    "freq5": {
+      "cagr": 0.24762420828731502,
+      "sharpe": 1.0811207425973794,
+      "max_drawdown": -0.17675047958562654,
+      "alpha_annualized_vs_ew": 0.03425393241669105,
+      "alpha_pvalue_vs_ew": 0.40631218229999355,
+      "alpha_annualized_vs_nifty": 0.12330136057575865,
+      "alpha_pvalue_vs_nifty": 0.012220483721623765,
+      "total_cost_inr": 315702.153809843,
+      "n_rebalances": 185.0
+    },
+    "freq60": {
+      "cagr": 0.27502888773294787,
+      "sharpe": 1.1705840729234418,
+      "max_drawdown": -0.16130795627964117,
+      "alpha_annualized_vs_ew": 0.046455499624898616,
+      "alpha_pvalue_vs_ew": 0.2540005632969846,
+      "alpha_annualized_vs_nifty": 0.13987526374701736,
+      "alpha_pvalue_vs_nifty": 0.005141420256437268,
+      "total_cost_inr": 42836.50461183783,
+      "n_rebalances": 16.0
+    },
+    "slip2x": {
+      "cagr": 0.25725912787646976,
+      "sharpe": 1.1293782592542134,
+      "max_drawdown": -0.17757630288433968,
+      "alpha_annualized_vs_ew": 0.04256443412479843,
+      "alpha_pvalue_vs_ew": 0.30928970590671123,
+      "alpha_annualized_vs_nifty": 0.13152946092076404,
+      "alpha_pvalue_vs_nifty": 0.007933596978057178,
+      "total_cost_inr": 169310.33654438108,
+      "n_rebalances": 47.0
+    },
+    "brokerage20": {
+      "cagr": 0.2728533828643487,
+      "sharpe": 1.2074442293032162,
+      "max_drawdown": -0.17565311556736757,
+      "alpha_annualized_vs_ew": 0.0647853723176809,
+      "alpha_pvalue_vs_ew": 0.1184312503620657,
+      "alpha_annualized_vs_nifty": 0.14392697681783545,
+      "alpha_pvalue_vs_nifty": 0.0035210011842281563,
+      "total_cost_inr": 137261.67246604396,
+      "n_rebalances": 47.0
+    }
+  },
+  "regime_breakdown": {
+    "pre_hindenburg": {
+      "strategy": {
+        "n_days": 141,
+        "cumulative_return": 0.2331642050628262,
+        "annualized_return": 0.4543725497696347,
+        "annualized_vol": 0.1494050188426617,
+        "max_drawdown": -0.08233109523923217
+      },
+      "nifty50": {
+        "n_days": 141,
+        "cumulative_return": 0.144168030904946,
+        "annualized_return": 0.2721402033677145,
+        "annualized_vol": 0.12914511804646753,
+        "max_drawdown": -0.06928321270541545
+      },
+      "ew_nifty49": {
+        "n_days": 141,
+        "cumulative_return": 0.17526635171225546,
+        "annualized_return": 0.3345965171025289,
+        "annualized_vol": 0.12661061147799257,
+        "max_drawdown": -0.06022015119618268
+      }
+    },
+    "hindenburg_adani": {
+      "strategy": {
+        "n_days": 62,
+        "cumulative_return": -0.027955412253697687,
+        "annualized_return": -0.1088510362739864,
+        "annualized_vol": 0.23484417851127912,
+        "max_drawdown": -0.10284350697208838
+      },
+      "nifty50": {
+        "n_days": 62,
+        "cumulative_return": 0.009671991527264723,
+        "annualized_return": 0.03989845616536458,
+        "annualized_vol": 0.10966115946410195,
+        "max_drawdown": -0.060479481241516087
+      },
+      "ew_nifty49": {
+        "n_days": 62,
+        "cumulative_return": 0.02007553677932461,
+        "annualized_return": 0.08414221314067305,
+        "annualized_vol": 0.11033863005175126,
+        "max_drawdown": -0.05313023561618462
+      }
+    },
+    "calm_bull_2024": {
+      "strategy": {
+        "n_days": 246,
+        "cumulative_return": 0.3202748217453437,
+        "annualized_return": 0.32925215746343595,
+        "annualized_vol": 0.1778398871690079,
+        "max_drawdown": -0.14492453912165987
+      },
+      "nifty50": {
+        "n_days": 246,
+        "cumulative_return": 0.0875222660593884,
+        "annualized_return": 0.08975003857621489,
+        "annualized_vol": 0.1409277087072801,
+        "max_drawdown": -0.109328075938688
+      },
+      "ew_nifty49": {
+        "n_days": 246,
+        "cumulative_return": 0.13994552469838384,
+        "annualized_return": 0.1435930700340522,
+        "annualized_vol": 0.14588737553404127,
+        "max_drawdown": -0.13146487226441966
+      }
+    },
+    "indusindbk_post": {
+      "strategy": {
+        "n_days": 267,
+        "cumulative_return": 0.17349417956015878,
+        "annualized_return": 0.1629941127882617,
+        "annualized_vol": 0.15306270190578175,
+        "max_drawdown": -0.13928506126466061
+      },
+      "nifty50": {
+        "n_days": 266,
+        "cumulative_return": 0.025321759259667953,
+        "annualized_return": 0.023973189914568094,
+        "annualized_vol": 0.13454358021115734,
+        "max_drawdown": -0.15181809374299451
+      },
+      "ew_nifty49": {
+        "n_days": 267,
+        "cumulative_return": 0.1066619555968189,
+        "annualized_return": 0.10037883510742707,
+        "annualized_vol": 0.1371626734648578,
+        "max_drawdown": -0.12405813992855842
+      }
+    }
+  },
+  "verification": {
+    "spot_check": {
+      "status": "pass",
+      "rebalance_date": "2024-06-18",
+      "fold_id": 9
+    },
+    "lookahead_violations": 0,
+    "n_problematic_trades": 0,
+    "frozen_fold_0_alpha_vs_ew": -0.005,
+    "frozen_fold_recency_contribution_bps": 622,
+    "top_3_contributors_bps": {
+      "BEL": 1448,
+      "TRENT": 768,
+      "ADANIENT": 677
+    },
+    "concentration_top_3_pct_of_alpha": 0.5,
+    "indusindbk_holds_during_2025_crisis": {
+      "stitched": 0,
+      "frozen_fold_0": 0
+    }
+  },
+  "cost_summary": {
+    "total_cost_inr": 120495.82,
+    "cost_pct_of_capital": 12.0496,
+    "n_trades": 743,
+    "avg_cost_per_trade_inr": 162.17
+  }
+}

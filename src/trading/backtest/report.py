@@ -193,11 +193,12 @@ def render_headline_table(
         f"strategy total cost paid: {cost_total:,.0f} INR ({cost_pct:.3f}% of initial capital)"
     )
     out.append(f"strategy n_rebalances:    {strategy.rebalance_log.height}")
-    out.append(
-        "n problematic trades:     "
-        f"{int(strategy.trade_log.filter(pl.col('cost_inr') > 0).height) if strategy.trade_log.is_empty() is False else 0} "
-        f"(see flag_problematic in trade_log)"
+    n_prob = (
+        int(strategy.rebalance_log["n_problematic_trades"].sum() or 0)
+        if not strategy.rebalance_log.is_empty()
+        else 0
     )
+    out.append(f"n problematic trades:     {n_prob} (trades with size > 1% of 20d ADV)")
     out.append("=" * 90)
     return "\n".join(out)
 
