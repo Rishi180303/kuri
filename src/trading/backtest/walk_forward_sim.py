@@ -21,6 +21,10 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
+import polars as pl
+
+from trading.models.lgbm import LightGBMClassifier
+
 
 class NoEligibleFoldError(RuntimeError):
     """Raised when no fold satisfies the lookahead invariant for a date."""
@@ -91,3 +95,63 @@ class FoldRouter:
         if not metas:
             raise FileNotFoundError(f"No fold_*/metadata.json found under {model_root}")
         return cls(metas, embargo_days=embargo_days)
+
+
+class StitchedPredictionsProvider:
+    """Generates per-rebalance predictions across the walk-forward folds.
+
+    Holds the joined feature frame in memory (cheap: ~400k rows, ~75
+    cols for our universe) and routes each rebalance to the right
+    fold's model. Models are loaded lazily and cached, so a 4-year
+    backtest with 50 rebalances loads at most 15 LightGBM boosters
+    once."""
+
+    def __init__(
+        self,
+        fold_router: FoldRouter,
+        feature_frame: pl.DataFrame,
+        universe: list[str],
+    ) -> None:
+        if "date" not in feature_frame.columns or "ticker" not in feature_frame.columns:
+            raise ValueError("feature_frame must contain date and ticker columns")
+        self._router = fold_router
+        self._features = feature_frame
+        self._universe = list(universe)
+        self._model_cache: dict[int, LightGBMClassifier] = {}
+
+    @property
+    def model_cache(self) -> dict[int, LightGBMClassifier]:
+        return self._model_cache
+
+    def predict_for(self, rebalance_date: date) -> pl.DataFrame:
+        fold = self._router.select_fold(rebalance_date)
+
+        # Lazy-load + cache
+        if fold.fold_id not in self._model_cache:
+            self._model_cache[fold.fold_id] = LightGBMClassifier.load(fold.model_path)
+        model = self._model_cache[fold.fold_id]
+
+        # Latest trading day strictly before rebalance_date
+        feat_dates = (
+            self._features.filter(pl.col("date") < rebalance_date)
+            .select("date")
+            .unique()
+            .sort("date")
+        )
+        if feat_dates.is_empty():
+            raise ValueError(f"No feature rows before {rebalance_date}")
+        feature_date = feat_dates["date"].to_list()[-1]
+
+        slice_df = self._features.filter(
+            (pl.col("date") == feature_date) & (pl.col("ticker").is_in(self._universe))
+        )
+        if slice_df.height < len(self._universe):
+            present = set(slice_df["ticker"].to_list())
+            missing = sorted(set(self._universe) - present)
+            raise ValueError(
+                f"Missing feature rows on {feature_date} for tickers: {missing[:5]}"
+                f"{'...' if len(missing) > 5 else ''}"
+            )
+
+        proba = model.predict_proba(slice_df)
+        return proba.select(["ticker", "predicted_proba"])
