@@ -28,6 +28,9 @@ Model subcommands (`kuri models ...`):
     train-lgbm       walk-forward training of the LightGBM baseline
     evaluate-lgbm    aggregate fold results into the evaluation report
     compare-runs     pull recent MLflow runs and print a summary table
+
+Backtest subcommands (`kuri backtest ...`):
+    run              run the primary backtest and write the pause-point headline
 """
 
 from __future__ import annotations
@@ -73,6 +76,10 @@ models_app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="Model training and evaluation."
 )
 app.add_typer(models_app, name="models")
+backtest_app = typer.Typer(
+    add_completion=False, no_args_is_help=True, help="Backtest engine commands."
+)
+app.add_typer(backtest_app, name="backtest")
 
 
 def _bootstrap_logging(verbose: bool) -> None:
@@ -669,6 +676,131 @@ def models_compare_runs(
     sub = df[cols].copy()
     sub["start_time"] = sub["start_time"].astype(str).str[:19]
     typer.echo(sub.to_string(index=False))
+
+
+# ---------------------------------------------------------------------------
+# Backtest subcommands
+# ---------------------------------------------------------------------------
+
+
+@backtest_app.command("run")
+def backtest_run(
+    name: str = typer.Option("primary", "--name", help="Backtest config name."),
+    start: str = typer.Option("2022-07-04", "--start", help="First rebalance YYYY-MM-DD."),
+    end: str = typer.Option("2026-04-01", "--end", help="Last allowed rebalance YYYY-MM-DD."),
+    n_positions: int = typer.Option(10, "--n-positions"),
+    rebalance_freq_days: int = typer.Option(20, "--rebalance-freq-days"),
+    output_dir: str = typer.Option(
+        "reports/backtest_v2", "--output-dir", help="Where to write headline.md and logs."
+    ),
+) -> None:
+    """Run the primary backtest and write the pause-point headline."""
+    from datetime import date
+
+    from trading.backtest.costs import IndianDeliveryCosts
+    from trading.backtest.data import (
+        load_index_ohlcv,
+        load_universe_ohlcv,
+    )
+    from trading.backtest.engine import (
+        run_backtest,
+        simulate_equal_weight_benchmark,
+    )
+    from trading.backtest.report import render_headline_table, write_primary_headline
+    from trading.backtest.slippage import ADVBasedSlippage
+    from trading.backtest.types import BacktestConfig
+    from trading.backtest.walk_forward_sim import (
+        FoldRouter,
+        StitchedPredictionsProvider,
+    )
+    from trading.training.data import load_training_data
+
+    log = get_logger("cli.backtest.run")
+    start_d = parse_iso_date(start)
+    end_d = parse_iso_date(end)
+    out_dir = Path(output_dir)
+
+    log.info("backtest.run.start", name=name, start=str(start_d), end=str(end_d))
+
+    # Load OHLCV with warmup back to 2018 so ADV computation inside
+    # run_backtest has enough history for the rolling 20-day window.
+    # The filter to >= start_d is intentionally NOT applied here —
+    # passing the full warmup frame lets run_backtest and
+    # simulate_equal_weight_benchmark compute ADV correctly from day 1
+    # of the backtest window. (Filtering to start_d before ADV compute
+    # would leave the first ~19 trading days with null ADV and worst-case
+    # slippage flags — a bug identified during Task 15 review.)
+    universe_ohlcv = load_universe_ohlcv(start=date(2018, 1, 1), end=end_d)
+    nsei = load_index_ohlcv("NSEI", start=start_d, end=end_d)
+    nifty_history = nsei.with_columns(
+        (pl.col("adj_close") / pl.col("adj_close").first() * 1_000_000.0).alias("total_value")
+    ).select(["date", "total_value"])
+
+    # Predictions provider
+    feature_frame = load_training_data(
+        start=date(2021, 12, 1),
+        end=end_d,
+        horizons=(20,),
+        feature_version=2,
+        label_version=1,
+        drop_label_nulls=False,
+    )
+    universe = sorted(feature_frame["ticker"].unique().to_list())
+    router = FoldRouter.from_disk(Path("models/v1/lgbm"), embargo_days=5)
+    provider = StitchedPredictionsProvider(
+        fold_router=router, feature_frame=feature_frame, universe=universe
+    )
+
+    cost = IndianDeliveryCosts()
+    slip = ADVBasedSlippage()
+
+    # Equal-weight Nifty 49 benchmark — same costs/slippage.
+    # Pass full warmup OHLCV (not filtered to start_d) so ADV computation
+    # inside simulate_equal_weight_benchmark is correct for the first month.
+    ew_history = simulate_equal_weight_benchmark(
+        universe_ohlcv=universe_ohlcv,
+        backtest_start=start_d,
+        backtest_end=end_d,
+        initial_capital=1_000_000.0,
+        rebalance_freq_days=rebalance_freq_days,
+        cost_model=cost,
+        slippage_model=slip,
+    )
+
+    cfg = BacktestConfig(
+        backtest_start=start_d,
+        backtest_end=end_d,
+        n_positions=n_positions,
+        rebalance_freq_days=rebalance_freq_days,
+        name=name,
+    )
+    # Pass full warmup OHLCV (not filtered to start_d) so ADV computation
+    # inside run_backtest is correct. run_backtest internally filters
+    # trading days to [backtest_start, backtest_end] via trading_days_in_window.
+    result = run_backtest(
+        predictions_provider=provider,
+        config=cfg,
+        universe_ohlcv=universe_ohlcv,
+        benchmark_ohlcv={"nifty50": nifty_history, "ew_nifty49": ew_history},
+        cost_model=cost,
+        slippage_model=slip,
+    )
+
+    benchmarks_for_report = {"nifty50": nifty_history, "ew_nifty49": ew_history}
+    table = render_headline_table(result, benchmarks_for_report)
+    typer.echo(table)
+    md_path = write_primary_headline(result, benchmarks_for_report, out_dir)
+
+    # Persist trade + rebalance logs alongside the headline
+    out_dir.mkdir(parents=True, exist_ok=True)
+    result.trade_log.write_csv(out_dir / "trade_log.csv")
+    result.rebalance_log.write_csv(out_dir / "rebalance_log.csv")
+    result.portfolio_history.write_csv(out_dir / "portfolio_history.csv")
+    nifty_history.write_csv(out_dir / "nifty50_history.csv")
+    ew_history.write_csv(out_dir / "ew_nifty49_history.csv")
+
+    typer.echo(f"\nHeadline written to {md_path}")
+    typer.echo(f"Logs written to {out_dir}/")
 
 
 if __name__ == "__main__":  # pragma: no cover
