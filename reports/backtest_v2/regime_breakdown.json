@@ -1,0 +1,94 @@
+{
+  "pre_hindenburg": {
+    "strategy": {
+      "n_days": 141,
+      "cumulative_return": 0.2331642050628262,
+      "annualized_return": 0.4543725497696347,
+      "annualized_vol": 0.1494050188426617,
+      "max_drawdown": -0.08233109523923217
+    },
+    "nifty50": {
+      "n_days": 141,
+      "cumulative_return": 0.144168030904946,
+      "annualized_return": 0.2721402033677145,
+      "annualized_vol": 0.12914511804646753,
+      "max_drawdown": -0.06928321270541545
+    },
+    "ew_nifty49": {
+      "n_days": 141,
+      "cumulative_return": 0.17526635171225546,
+      "annualized_return": 0.3345965171025289,
+      "annualized_vol": 0.12661061147799257,
+      "max_drawdown": -0.06022015119618268
+    }
+  },
+  "hindenburg_adani": {
+    "strategy": {
+      "n_days": 62,
+      "cumulative_return": -0.027955412253697687,
+      "annualized_return": -0.1088510362739864,
+      "annualized_vol": 0.23484417851127912,
+      "max_drawdown": -0.10284350697208838
+    },
+    "nifty50": {
+      "n_days": 62,
+      "cumulative_return": 0.009671991527264723,
+      "annualized_return": 0.03989845616536458,
+      "annualized_vol": 0.10966115946410195,
+      "max_drawdown": -0.060479481241516087
+    },
+    "ew_nifty49": {
+      "n_days": 62,
+      "cumulative_return": 0.02007553677932461,
+      "annualized_return": 0.08414221314067305,
+      "annualized_vol": 0.11033863005175126,
+      "max_drawdown": -0.05313023561618462
+    }
+  },
+  "calm_bull_2024": {
+    "strategy": {
+      "n_days": 246,
+      "cumulative_return": 0.3202748217453437,
+      "annualized_return": 0.32925215746343595,
+      "annualized_vol": 0.1778398871690079,
+      "max_drawdown": -0.14492453912165987
+    },
+    "nifty50": {
+      "n_days": 246,
+      "cumulative_return": 0.0875222660593884,
+      "annualized_return": 0.08975003857621489,
+      "annualized_vol": 0.1409277087072801,
+      "max_drawdown": -0.109328075938688
+    },
+    "ew_nifty49": {
+      "n_days": 246,
+      "cumulative_return": 0.13994552469838384,
+      "annualized_return": 0.1435930700340522,
+      "annualized_vol": 0.14588737553404127,
+      "max_drawdown": -0.13146487226441966
+    }
+  },
+  "indusindbk_post": {
+    "strategy": {
+      "n_days": 267,
+      "cumulative_return": 0.17349417956015878,
+      "annualized_return": 0.1629941127882617,
+      "annualized_vol": 0.15306270190578175,
+      "max_drawdown": -0.13928506126466061
+    },
+    "nifty50": {
+      "n_days": 266,
+      "cumulative_return": 0.025321759259667953,
+      "annualized_return": 0.023973189914568094,
+      "annualized_vol": 0.13454358021115734,
+      "max_drawdown": -0.15181809374299451
+    },
+    "ew_nifty49": {
+      "n_days": 267,
+      "cumulative_return": 0.1066619555968189,
+      "annualized_return": 0.10037883510742707,
+      "annualized_vol": 0.1371626734648578,
+      "max_drawdown": -0.12405813992855842
+    }
+  }
+}

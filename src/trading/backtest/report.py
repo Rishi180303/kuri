@@ -7,6 +7,9 @@ report land in Tasks 17+ post-approval."""
 from __future__ import annotations
 
 import json
+import math
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +31,106 @@ _PALETTE: dict[str, str] = {
     "drawdown": "#1f3b73",
     "drawdown_fill": "#aab5d3",
 }
+
+
+@dataclass(frozen=True)
+class RegimeWindow:
+    """A named date window for regime-conditional decomposition."""
+
+    name: str
+    start: date  # inclusive
+    end: date  # inclusive
+
+
+@dataclass(frozen=True)
+class RegimeStats:
+    """Cumulative return + key stats for one series within one regime window."""
+
+    n_days: int
+    cumulative_return: float  # decimal, e.g. 0.15 = +15%
+    annualized_return: float  # decimal, annualized using actual trading days
+    annualized_vol: float  # decimal
+    max_drawdown: float  # decimal, negative
+
+
+DEFAULT_REGIME_WINDOWS: list[RegimeWindow] = [
+    RegimeWindow("pre_hindenburg", date(2022, 7, 4), date(2023, 1, 24)),
+    RegimeWindow("hindenburg_adani", date(2023, 1, 25), date(2023, 4, 30)),
+    RegimeWindow("calm_bull_2024", date(2024, 1, 1), date(2024, 12, 31)),
+    RegimeWindow("indusindbk_post", date(2025, 3, 1), date(2026, 4, 1)),
+]
+
+_MIN_WINDOW_DAYS = 5
+
+
+def _compute_regime_stats(frame: pl.DataFrame) -> RegimeStats:
+    """Compute RegimeStats from a filtered NAV frame (already windowed)."""
+    vals = frame.sort("date")["total_value"].to_numpy()
+    n_days = len(vals)
+
+    first_val = float(vals[0])
+    last_val = float(vals[-1])
+    cumulative_return = (last_val / first_val) - 1.0
+
+    annualized_return = (1.0 + cumulative_return) ** (252.0 / n_days) - 1.0
+
+    # Daily returns via pct_change (drop the leading null)
+    daily_rets = (
+        frame.sort("date")
+        .with_columns(pl.col("total_value").pct_change().alias("_ret"))
+        .drop_nulls("_ret")["_ret"]
+        .to_numpy()
+    )
+    if len(daily_rets) > 1:
+        annualized_vol = float(np.std(daily_rets, ddof=1)) * math.sqrt(252.0)
+    else:
+        annualized_vol = float("nan")
+
+    # Max drawdown within window
+    running_max = np.maximum.accumulate(vals)
+    drawdowns = (vals - running_max) / running_max
+    max_drawdown = float(np.min(drawdowns))
+
+    return RegimeStats(
+        n_days=n_days,
+        cumulative_return=cumulative_return,
+        annualized_return=annualized_return,
+        annualized_vol=annualized_vol,
+        max_drawdown=max_drawdown,
+    )
+
+
+def compute_named_regime_breakdown(
+    portfolio_history: pl.DataFrame,
+    benchmark_histories: dict[str, pl.DataFrame],
+    windows: list[RegimeWindow],
+) -> dict[str, dict[str, RegimeStats]]:
+    """Decompose performance by named regime window.
+
+    Returns nested dict shaped like:
+        {window_name: {"strategy": RegimeStats, "<bench_name>": RegimeStats, ...}}
+
+    Windows where a series has fewer than 5 trading days are omitted from that
+    series's entry (the key is absent from the inner dict). If no series
+    produces at least 5 days in the window the outer key maps to an empty dict.
+    """
+    result: dict[str, dict[str, RegimeStats]] = {}
+
+    all_series: dict[str, pl.DataFrame] = {"strategy": portfolio_history}
+    all_series.update(benchmark_histories)
+
+    for window in windows:
+        inner: dict[str, RegimeStats] = {}
+        for series_name, frame in all_series.items():
+            filtered = frame.filter(
+                (pl.col("date") >= window.start) & (pl.col("date") <= window.end)
+            )
+            if filtered.height < _MIN_WINDOW_DAYS:
+                continue
+            inner[series_name] = _compute_regime_stats(filtered)
+        result[window.name] = inner
+
+    return result
 
 
 def render_headline_table(
