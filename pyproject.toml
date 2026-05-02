@@ -90,7 +90,7 @@ pretty = true
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["yfinance.*", "duckdb.*", "pandas.*", "sklearn.*", "mlflow.*", "lightgbm.*", "optuna.*", "joblib.*"]
+module = ["yfinance.*", "duckdb.*", "pandas.*", "sklearn.*", "mlflow.*", "lightgbm.*", "optuna.*", "joblib.*", "scipy.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
