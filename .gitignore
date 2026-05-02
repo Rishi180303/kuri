@@ -59,6 +59,9 @@ GEMINI.md
 # --- Local-only audit / exploration scripts ---
 scripts/explore.py
 
+# --- Local-only build progress tracker ---
+PHASES.md
+
 # --- OS junk ---
 .DS_Store
 .AppleDouble
