@@ -7,6 +7,7 @@ trading days."""
 from __future__ import annotations
 
 import numpy as np
+import polars as pl
 from scipy import stats
 
 TRADING_DAYS_PER_YEAR = 252
@@ -152,3 +153,61 @@ def information_ratio(
     if sigma == 0:
         return 0.0
     return float(np.mean(excess) / sigma * np.sqrt(periods_per_year))
+
+
+def compute_all_metrics(
+    portfolio_history: pl.DataFrame,
+    benchmark_history: pl.DataFrame | None = None,
+    *,
+    risk_free_rate: float = 0.06,
+) -> dict[str, float]:
+    """Aggregate every metric the report needs into one dict.
+
+    ``portfolio_history`` and ``benchmark_history`` are frames with
+    columns ``[date, total_value]`` (matching what the engine
+    produces). Benchmark is optional: if absent, alpha/beta/IR are NaN."""
+    h = portfolio_history.sort("date")
+    equity: np.ndarray = np.asarray(h["total_value"].to_numpy(), dtype=float)
+    rets: np.ndarray = np.asarray(h["total_value"].pct_change().to_numpy(), dtype=float)
+
+    metrics: dict[str, float] = {
+        "total_return": float(equity[-1] / equity[0] - 1.0),
+        "cagr": cagr(rets),
+        "annualized_vol": annualized_volatility(rets),
+        "sharpe": sharpe_ratio(rets, risk_free_rate=risk_free_rate),
+        "sortino": sortino_ratio(rets, risk_free_rate=risk_free_rate),
+    }
+    dd, dd_dur = max_drawdown(equity)
+    metrics["max_drawdown"] = dd
+    metrics["max_drawdown_duration"] = float(dd_dur)
+    metrics["calmar"] = calmar_ratio(rets, equity)
+
+    if benchmark_history is not None:
+        b = benchmark_history.sort("date")
+        # Align lengths: take intersection on date
+        merged = (
+            h.select(["date", "total_value"])
+            .rename({"total_value": "s"})
+            .join(
+                b.select(["date", "total_value"]).rename({"total_value": "b"}),
+                on="date",
+                how="inner",
+            )
+            .sort("date")
+        )
+        s_rets: np.ndarray = np.asarray(merged["s"].pct_change().to_numpy(), dtype=float)
+        bm_rets: np.ndarray = np.asarray(merged["b"].pct_change().to_numpy(), dtype=float)
+        a, beta, p = alpha_beta_pvalue(s_rets, bm_rets)
+        metrics["alpha_annualized"] = a * TRADING_DAYS_PER_YEAR if np.isfinite(a) else float("nan")
+        metrics["beta"] = beta
+        metrics["alpha_pvalue"] = p
+        metrics["information_ratio"] = information_ratio(s_rets, bm_rets)
+    else:
+        metrics["alpha_annualized"] = float("nan")
+        metrics["beta"] = float("nan")
+        metrics["alpha_pvalue"] = float("nan")
+        metrics["information_ratio"] = float("nan")
+
+    # Trade-period stats (win rate, avg win/loss, profit factor) live in
+    # report.py since they need the rebalance log, not just daily NAV.
+    return metrics
