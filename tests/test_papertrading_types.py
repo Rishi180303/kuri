@@ -27,8 +27,13 @@ def test_run_status_members() -> None:
         "success",
         "partial",
         "failed",
+        "data_stale",
         "skipped_holiday",
     }
+
+
+def test_data_stale_string_value() -> None:
+    assert RunStatus.DATA_STALE.value == "data_stale"
 
 
 def test_run_source_members() -> None:

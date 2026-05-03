@@ -17,6 +17,7 @@ class RunStatus(StrEnum):
     SUCCESS = "success"
     PARTIAL = "partial"
     FAILED = "failed"
+    DATA_STALE = "data_stale"
     SKIPPED_HOLIDAY = "skipped_holiday"
 
 

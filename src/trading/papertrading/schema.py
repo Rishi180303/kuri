@@ -32,7 +32,7 @@ _SCHEMA_V1 = [
         run_date            TEXT PRIMARY KEY,
         run_timestamp       TEXT NOT NULL,
         status              TEXT NOT NULL CHECK (status IN
-                              ('success', 'partial', 'failed', 'skipped_holiday')),
+                              ('success', 'partial', 'failed', 'data_stale', 'skipped_holiday')),
         n_picks_generated   INTEGER,
         error_message       TEXT,
         git_sha             TEXT NOT NULL,
