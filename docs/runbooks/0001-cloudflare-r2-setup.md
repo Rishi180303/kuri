@@ -27,13 +27,20 @@ One-time manual setup. Estimated time: 30 minutes.
 
 ## Verification
 
-After setup, run locally:
+After setup, confirm credentials work with a small upload/delete roundtrip against the live bucket. Requires `aws-cli` locally (`brew install awscli` on macOS); skip if not installed and rely on Task 9's manual `workflow_dispatch` as the real verification.
+
 ```bash
-# Install rclone or AWS CLI configured for R2
-# Test upload and download a small file to confirm credentials work
+# Test credentials work (one-time, after secret setup)
+export AWS_ACCESS_KEY_ID="<paste from setup step 4>"
+export AWS_SECRET_ACCESS_KEY="<paste from setup step 4>"
+echo "test" > /tmp/r2-test.txt
+aws s3 cp /tmp/r2-test.txt s3://kuri-papertrading-state/test.txt \
+  --endpoint-url https://<account_id>.r2.cloudflarestorage.com
+aws s3 rm s3://kuri-papertrading-state/test.txt \
+  --endpoint-url https://<account_id>.r2.cloudflarestorage.com
 ```
 
-(Detailed verification command depends on the tooling chosen in Task 9 — rclone or aws-cli or similar. Task 9 dispatch will refine.)
+Substitute `<account_id>` with the value from setup step 5. Both commands should succeed silently. The endpoint format `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` is Cloudflare's standard; the same construction is used in the Task 9 workflow YAML (see ADR 0001).
 
 ## Cost monitoring
 
