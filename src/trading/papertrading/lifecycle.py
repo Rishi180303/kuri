@@ -41,7 +41,7 @@ import datetime
 import polars as pl
 
 from trading.backtest.costs import IndianDeliveryCosts
-from trading.backtest.data import compute_adv_inr
+from trading.backtest.data import compute_adv_inr, load_index_ohlcv
 from trading.backtest.engine import execute_rebalance
 from trading.backtest.portfolio import Portfolio
 from trading.backtest.slippage import ADVBasedSlippage
@@ -473,50 +473,47 @@ def _extract_regime_label(
         raise ValueError(f"nifty_above_sma_200 is null for all tickers on {feature_date}.")
     nifty_above_sma_200 = int(nifty_sma_col[0])
 
-    # nifty_60d_return: compute from NSEI data in the universe_ohlcv
-    # (use any Nifty-correlated proxy if NSEI is not present — fall back to
-    #  the per-ticker ret_60d average if available)
-    nifty_60d_return = _compute_nifty_60d_return(feature_frame, feature_date)
+    # nifty_60d_return: load NSEI directly per spec Section 9 (cap-weighted
+    # broad-market index, not a constituent statistic).
+    nifty_60d_return = _compute_nifty_60d_return(feature_date)
 
     return classify_regime(vol_regime, nifty_above_sma_200, nifty_60d_return)
 
 
-def _compute_nifty_60d_return(
-    feature_frame: pl.DataFrame,
-    feature_date: datetime.date,
-) -> float:
-    """Compute the Nifty 60-day return as of ``feature_date``.
+def _compute_nifty_60d_return(feature_date: datetime.date) -> float:
+    """Compute the Nifty 60-trading-day return as of ``feature_date``.
 
-    Tries two extraction paths in order:
-    1. Uses ``nifty_above_sma_200`` as a directional proxy combined with
-       the universe median ``ret_60d`` column from the feature_frame
-       (lookahead-safe: the feature frame already holds values for feature_date).
-    2. If ``ret_60d`` is not available, returns NaN (triggering DATA_STALE).
+    Per spec Section 9: the regime input is the broad-market cap-weighted
+    Nifty 50 index return, computed from ``data/raw/index/symbol=NSEI``,
+    not a constituent statistic. Cap-weighted index returns diverge from
+    equal-weighted medians when mega-caps move differently from the
+    broader universe — Phase 4's C-frame headline established this
+    distinction (8.94 pp gap between strategy alpha vs Nifty-50 and strategy
+    alpha vs equal-weight Nifty-49).
 
-    The return is computed as the median ``ret_60d`` across the universe on
-    ``feature_date``.  This is a conservative approximation; the exact NSEI
-    index return would require loading ``data/raw/index/symbol=NSEI`` —
-    which is correct but adds an I/O dependency here.  Using the universe
-    median is faithful to the spec intent (regime features drawn from
-    feature_frame for t-1) and avoids a hard dependency on the index file.
+    Returns NaN if NSEI history doesn't have 60+ trading days before
+    ``feature_date``. NaN propagates to ``classify_regime`` which raises
+    ValueError → DATA_STALE.
     """
     import math
 
-    if "ret_60d" not in feature_frame.columns:
+    # Load enough NSEI history to look back 60 trading days plus a safety margin.
+    # ~180 calendar days = ~120 trading days, comfortably more than the 61 closes needed.
+    start = feature_date - datetime.timedelta(days=180)
+    nsei = load_index_ohlcv("NSEI", start=start, end=feature_date)
+
+    nsei_on_or_before = nsei.filter(pl.col("date") <= feature_date).sort("date")
+    if nsei_on_or_before.height < 61:
         return float("nan")
 
-    slice_df = feature_frame.filter(pl.col("date") == feature_date).select("ret_60d")
-    valid = slice_df["ret_60d"].drop_nulls()
-    if valid.is_empty():
+    closes = nsei_on_or_before["adj_close"].to_list()
+    today_close = float(closes[-1])
+    ago_close = float(closes[-61])
+
+    if not (math.isfinite(today_close) and math.isfinite(ago_close)) or ago_close == 0.0:
         return float("nan")
 
-    raw_median = valid.median()
-    if raw_median is None:
-        return float("nan")
-    median_val = float(raw_median)  # type: ignore[arg-type]
-    if math.isnan(median_val):
-        return float("nan")
-    return median_val
+    return (today_close / ago_close) - 1.0
 
 
 def _close_lookup(ohlcv: pl.DataFrame, target_date: datetime.date) -> dict[str, float]:

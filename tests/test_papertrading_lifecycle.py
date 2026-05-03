@@ -356,7 +356,14 @@ def test_rebalance_day_all_five_tables_populated(tmp_path: Path) -> None:
 
 def test_nan_features_produce_data_stale_no_main_transaction(tmp_path: Path) -> None:
     """NaN nifty_60d_return triggers DATA_STALE: daily_runs written,
-    write_main_transaction NOT called."""
+    write_main_transaction NOT called.
+
+    Post-amendment: nifty_60d_return is computed from NSEI directly per
+    spec Section 9, not from feature_frame.ret_60d. To trigger NaN, we
+    patch load_index_ohlcv to return an empty frame (insufficient history
+    for the 60-trading-day lookback)."""
+    from unittest.mock import patch
+
     from trading.papertrading.store import PaperTradingStore as RealStore
 
     db = tmp_path / "test.db"
@@ -370,8 +377,7 @@ def test_nan_features_produce_data_stale_no_main_transaction(tmp_path: Path) -> 
     _seed_initial_state(real_store, seed)
     real_store.close()
 
-    # Feature frame with NaN in ret_60d → _compute_nifty_60d_return returns NaN
-    nan_features = _make_feature_frame().with_columns(pl.lit(float("nan")).alias("ret_60d"))
+    features = _make_feature_frame()
     ohlcv = _make_ohlcv()
     provider = _SyntheticProvider(TICKERS)
 
@@ -386,7 +392,13 @@ def test_nan_features_produce_data_stale_no_main_transaction(tmp_path: Path) -> 
 
     store.write_main_transaction = spy_write_main  # type: ignore[method-assign]
 
-    record = run_daily(target, store, provider, ohlcv, nan_features, source=RunSource.BACKTEST)
+    # Patch load_index_ohlcv to return an empty NSEI frame; the 60d return
+    # computation needs >= 61 closes, so empty triggers NaN → ValueError → DATA_STALE.
+    empty_nsei = pl.DataFrame(
+        {"date": [], "adj_close": []}, schema={"date": pl.Date, "adj_close": pl.Float64}
+    )
+    with patch("trading.papertrading.lifecycle.load_index_ohlcv", return_value=empty_nsei):
+        record = run_daily(target, store, provider, ohlcv, features, source=RunSource.BACKTEST)
     store.close()
 
     assert record.status == RunStatus.DATA_STALE
