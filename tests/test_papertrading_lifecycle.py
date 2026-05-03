@@ -512,7 +512,75 @@ def test_successful_run_daily_runs_row_exists(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 8. Real-fold-9 integration test
+# 8. Source parameter test
+# ---------------------------------------------------------------------------
+
+
+def test_run_daily_accepts_source_parameter(tmp_path: Path) -> None:
+    """run_daily threads source kwarg through to portfolio_state.source.
+
+    Verifies:
+    - source=RunSource.BACKTEST → portfolio_state.source == 'backtest'
+    - default (no source kwarg) → portfolio_state.source == 'live'
+    """
+    import sqlite3
+
+    ohlcv = _make_ohlcv()
+    features = _make_feature_frame()
+    provider = _SyntheticProvider(TICKERS)
+
+    # ---- BACKTEST source ----
+    store_bt = _make_store(tmp_path / "bt")
+    seed_bt = datetime.date(2024, 1, 1)
+    target_bt = datetime.date(2024, 1, 2)
+    _seed_initial_state(store_bt, seed_bt)
+
+    record_bt = run_daily(
+        target_bt,
+        store_bt,
+        provider,
+        ohlcv,
+        features,
+        source=RunSource.BACKTEST,
+    )
+    assert record_bt.status == RunStatus.SUCCESS
+
+    with sqlite3.connect(tmp_path / "bt" / "test.db") as conn:
+        src_row = conn.execute(
+            "SELECT source FROM portfolio_state WHERE date = ?",
+            (target_bt.isoformat(),),
+        ).fetchone()
+    assert src_row is not None, "No portfolio_state row written for BACKTEST run"
+    assert src_row[0] == "backtest", f"Expected source='backtest', got {src_row[0]!r}"
+
+    # ---- LIVE source (default) ----
+    store_lv = _make_store(tmp_path / "lv")
+    seed_lv = datetime.date(2024, 1, 1)
+    target_lv = datetime.date(2024, 1, 2)
+    _seed_initial_state(store_lv, seed_lv)
+
+    # Call without passing source — should default to RunSource.LIVE
+    record_lv = run_daily(
+        target_lv,
+        store_lv,
+        provider,
+        ohlcv,
+        features,
+        # source intentionally omitted → defaults to RunSource.LIVE
+    )
+    assert record_lv.status == RunStatus.SUCCESS
+
+    with sqlite3.connect(tmp_path / "lv" / "test.db") as conn:
+        src_row_lv = conn.execute(
+            "SELECT source FROM portfolio_state WHERE date = ?",
+            (target_lv.isoformat(),),
+        ).fetchone()
+    assert src_row_lv is not None, "No portfolio_state row written for LIVE run"
+    assert src_row_lv[0] == "live", f"Expected source='live', got {src_row_lv[0]!r}"
+
+
+# ---------------------------------------------------------------------------
+# 9. Real-fold-9 integration test
 # ---------------------------------------------------------------------------
 
 
