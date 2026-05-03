@@ -709,3 +709,227 @@ def test_lifecycle_real_fold_9_at_2024_06_18(tmp_path: Path) -> None:
         f"Lifecycle picks diverge from Phase 4 spot-check. "
         f"Extra: {picked - expected}, missing: {expected - picked}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 10. Regression: trading-day cadence ignores weekend gaps (synthetic)
+# ---------------------------------------------------------------------------
+
+
+def test_rebalance_cadence_skips_weekends(tmp_path: Path) -> None:
+    """Regression: trading-day cadence ignores weekend gaps.
+
+    Constructs a synthetic portfolio_state with 30 weekday rows spanning
+    ~6 weeks of real calendar time. With rebalance_freq_days=20, the
+    rebalance must fire on the 21st weekday (index 20), not earlier.
+
+    Catches the calendar-vs-trading-day bug where _count_trading_days_since
+    used to return raw calendar days against the trading-day threshold."""
+    import datetime as dt
+
+    from trading.papertrading.lifecycle import _check_rebalance
+    from trading.papertrading.types import PositionRow
+
+    db = tmp_path / "test.db"
+    migrate(db)
+    store = PaperTradingStore(db)
+
+    # Seed 30 weekday-only portfolio_state rows + an open position with
+    # entry_date = first day. Skip Saturdays and Sundays.
+    weekdays: list[dt.date] = []
+    d = dt.date(2024, 1, 1)
+    while len(weekdays) < 30:
+        if d.weekday() < 5:
+            weekdays.append(d)
+        d += dt.timedelta(days=1)
+    entry = weekdays[0]
+
+    for _i, day in enumerate(weekdays):
+        store.write_main_transaction(
+            day,
+            [],
+            None,
+            PortfolioStateRow(
+                date=day,
+                total_value=1_000_000.0,
+                cash=0.0,
+                n_positions=1,
+                gross_value=1_000_000.0,
+                regime_label=RegimeLabel.CALM_BULL,
+                source=RunSource.BACKTEST,
+            ),
+            [
+                PositionRow(
+                    date=day,
+                    ticker="X",
+                    qty=1.0,
+                    entry_date=entry,
+                    entry_price=1_000_000.0,
+                    current_mark=1_000_000.0,
+                    mtm_value=1_000_000.0,
+                )
+            ],
+        )
+
+    # Iterate _check_rebalance for each day; assert rebalance fires only at index 20
+    for i, day in enumerate(weekdays):
+        # Use the per-day state we just wrote
+        per_day_state = PortfolioStateRow(
+            date=day,
+            total_value=1_000_000.0,
+            cash=0.0,
+            n_positions=1,
+            gross_value=1_000_000.0,
+            regime_label=RegimeLabel.CALM_BULL,
+            source=RunSource.BACKTEST,
+        )
+        result = _check_rebalance(store, per_day_state, rebalance_freq_days=20)
+        if i < 20:
+            assert not result.is_rebalance_day, (
+                f"day index {i} ({day}) should NOT be a rebalance day "
+                f"(only {result.trading_days_since_last_rebalance} trading "
+                f"days since last rebalance)"
+            )
+        else:
+            assert result.is_rebalance_day, (
+                f"day index {i} ({day}) should BE a rebalance day "
+                f"({result.trading_days_since_last_rebalance} trading days "
+                f"since last rebalance)"
+            )
+
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# 11. Regression: real-OHLCV 60-day window → exactly 3 rebalances
+# ---------------------------------------------------------------------------
+
+
+def test_rebalance_cadence_real_ohlcv_window(tmp_path: Path) -> None:
+    """Regression: real OHLCV with weekends and holidays produces exactly
+    3 rebalances over 60 trading days at freq=20.
+
+    This test exercises the bug class that the synthetic lifecycle tests
+    in Task 5 missed — synthetic consecutive-weekday data didn't surface
+    the calendar-vs-trading-day discrepancy."""
+    import datetime as dt
+
+    if not Path("models/v1/lgbm/fold_9").exists():
+        pytest.skip("real fold artifacts not present")
+    if not Path("data/features/v2").exists():
+        pytest.skip("v2 feature store not present")
+
+    from trading.backtest.data import load_universe_ohlcv
+    from trading.backtest.walk_forward_sim import (
+        FoldRouter,
+        StitchedPredictionsProvider,
+    )
+    from trading.papertrading.types import RunRecord, RunStatus
+    from trading.training.data import load_training_data
+
+    # Window: pick a 60-trading-day stretch known to be entirely after
+    # the Phase 4 backtest start (so all folds & features available)
+    target_start = dt.date(2024, 4, 1)
+    target_end = dt.date(2024, 6, 30)
+
+    # Setup
+    db = tmp_path / "test.db"
+    migrate(db)
+    store = PaperTradingStore(db)
+
+    # Cold-start seed at the day before target_start
+    seed_date = dt.date(2024, 3, 28)  # last trading day before target_start
+    store.write_main_transaction(
+        seed_date,
+        [],
+        None,
+        PortfolioStateRow(
+            date=seed_date,
+            total_value=1_000_000.0,
+            cash=1_000_000.0,
+            n_positions=0,
+            gross_value=0.0,
+            regime_label=RegimeLabel.CHOPPY,
+            source=RunSource.BACKTEST,
+        ),
+        [],
+    )
+    store.write_daily_run(
+        RunRecord(
+            run_date=seed_date,
+            run_timestamp=datetime.datetime.now(datetime.UTC),
+            status=RunStatus.SUCCESS,
+            git_sha="seed",
+            source=RunSource.BACKTEST,
+        )
+    )
+
+    # Load real data + provider
+    ohlcv = load_universe_ohlcv(start=dt.date(2018, 1, 1), end=target_end)
+    feature_frame = load_training_data(
+        start=dt.date(2021, 12, 1),
+        end=target_end,
+        horizons=(20,),
+        feature_version=2,
+        label_version=1,
+        drop_label_nulls=False,
+    )
+    universe = sorted(feature_frame["ticker"].unique().to_list())
+    router = FoldRouter.from_disk(Path("models/v1/lgbm"), embargo_days=5)
+    provider = StitchedPredictionsProvider(router, feature_frame, universe)
+
+    # Iterate trading days in [target_start, target_end] from OHLCV
+    trading_days = sorted(
+        ohlcv.filter((pl.col("date") >= target_start) & (pl.col("date") <= target_end))["date"]
+        .unique()
+        .to_list()
+    )
+
+    # Skip if window is shorter than expected
+    assert (
+        len(trading_days) >= 60
+    ), f"expected >= 60 trading days in window, got {len(trading_days)}"
+    trading_days = trading_days[:60]  # exactly 60
+
+    for d in trading_days:
+        run_daily(
+            d,
+            store,
+            provider,
+            ohlcv,
+            feature_frame,
+            source=RunSource.BACKTEST,
+            git_sha="cadence-test",
+        )
+
+    # Verify: exactly 3 rebalances (60/20) in daily_picks
+    with sqlite3.connect(db) as conn:
+        n_rebalances = conn.execute(
+            "SELECT COUNT(DISTINCT run_date) FROM daily_picks WHERE run_date BETWEEN ? AND ?",
+            (target_start.isoformat(), target_end.isoformat()),
+        ).fetchone()[0]
+        rebalance_dates = sorted(
+            {
+                r[0]
+                for r in conn.execute(
+                    "SELECT DISTINCT run_date FROM daily_picks WHERE run_date BETWEEN ? AND ?",
+                    (target_start.isoformat(), target_end.isoformat()),
+                )
+            }
+        )
+
+    assert (
+        n_rebalances == 3
+    ), f"expected 3 rebalances over 60 trading days at freq=20, got {n_rebalances}: {rebalance_dates}"
+
+    # Verify: gap between consecutive rebalances is exactly 20 trading days
+    import itertools
+
+    parsed = [dt.date.fromisoformat(d) for d in rebalance_dates]
+    for prev, curr in itertools.pairwise(parsed):
+        gap_trading = sum(1 for d in trading_days if prev < d <= curr)
+        assert (
+            gap_trading == 20
+        ), f"gap from {prev} to {curr} = {gap_trading} trading days, expected 20"
+
+    store.close()

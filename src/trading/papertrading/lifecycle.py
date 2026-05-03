@@ -148,7 +148,7 @@ def run_daily(
             f"backfill not run yet — no portfolio_state rows in DB. "
             f"Run `kuri papertrading backfill` before processing {target_date}."
         )
-    rebalance_check = _check_rebalance(store, latest_state, rebalance_freq_days)
+    rebalance_check = _check_rebalance(store, latest_state, rebalance_freq_days, as_of=target_date)
 
     # ------------------------------------------------------------------
     # Step 6: generate predictions for all 49 universe tickers
@@ -249,6 +249,7 @@ def _check_rebalance(
     store: PaperTradingStore,
     latest_state: PortfolioStateRow,
     rebalance_freq_days: int,
+    as_of: datetime.date | None = None,
 ) -> RebalanceCheckResult:
     """Determine whether today is a rebalance day.
 
@@ -256,6 +257,19 @@ def _check_rebalance(
     - The positions table has no open positions (empty portfolio), OR
     - The number of trading days since the most recent entry_date across
       all current positions is >= rebalance_freq_days.
+
+    Args:
+        store: the paper trading store, used to read portfolio history.
+        latest_state: the most recently committed portfolio_state row
+            (typically yesterday's state). Used to look up open positions.
+        rebalance_freq_days: fire a rebalance when this many trading days
+            have elapsed since the last entry_date.
+        as_of: the date to treat as "today" for the trading-day count.
+            Callers that know the current target_date should pass it here
+            so the count is inclusive of today (matching the Phase 4
+            stride-based schedule). Defaults to ``latest_state.date``
+            (yesterday), which is one trading day short; use only when
+            the caller has already committed today's portfolio_state row.
     """
     open_positions = store.get_open_positions(latest_state.date)
     if not open_positions:
@@ -270,7 +284,8 @@ def _check_rebalance(
 
     # Count how many positions share this entry_date
     # (all of them should, but use max to be defensive)
-    days_since = _count_trading_days_since(latest_state.date, most_recent_entry)
+    effective_as_of = as_of if as_of is not None else latest_state.date
+    days_since = _count_trading_days_since(store, effective_as_of, most_recent_entry)
     is_rebalance = days_since >= rebalance_freq_days
 
     return RebalanceCheckResult(
@@ -279,16 +294,47 @@ def _check_rebalance(
     )
 
 
-def _count_trading_days_since(as_of: datetime.date, since: datetime.date) -> int:
-    """Count calendar days between ``since`` and ``as_of`` (inclusive on as_of).
+def _count_trading_days_since(
+    store: PaperTradingStore,
+    as_of: datetime.date,
+    since: datetime.date,
+) -> int:
+    """Count trading days the lifecycle has processed strictly after
+    ``since`` and on-or-before ``as_of``.
 
-    This is a conservative approximation using calendar days / 1.4 since
-    we don't have a full trading calendar here. For production accuracy the
-    backfill uses the OHLCV-derived trading day list; for the lifecycle we
-    use the simpler integer delta since the rebalance schedule is already
-    embedded in the entry_dates stored in SQLite.
+    Uses ``portfolio_state`` row count as the canonical definition of
+    "trading days the lifecycle has seen." This is self-consistent:
+    ``portfolio_state`` is written exactly once per trading day by
+    construction, so its row count between two dates IS the trading-day
+    distance.
+
+    When ``as_of`` is ahead of the latest committed ``portfolio_state`` row
+    (i.e., the current trading day has not yet been written), the function
+    adds +1 to account for the current day.  This keeps the lifecycle
+    cadence consistent with the Phase 4 stride schedule (``sorted_days[::20]``
+    fires on trading-day indices 0, 20, 40, …), which counts the current day
+    inclusive: a rebalance on day 0 followed by the next on day 20 means
+    exactly 20 trading days have elapsed.
+
+    Trade-off vs alternatives:
+    - Calendar days x scalar: fragile, holiday-dependent. (Was the prior
+      buggy approach — returned raw calendar days against a trading-day
+      threshold, causing the rebalance schedule to fire on calendar-day-20
+      approximately trading-day-14 instead of trading-day-20.)
+    - OHLCV distinct dates: introduces a second source of truth.
+    - External trading calendar: another dependency, edge cases at NSE
+      special / muhurat sessions.
     """
-    return (as_of - since).days
+    history = store.read_portfolio_history()
+    count = sum(1 for state in history if since < state.date <= as_of)
+    # If as_of is ahead of the most-recently committed portfolio_state row,
+    # the current trading day has not yet been committed.  Add +1 to count
+    # today so that the rebalance threshold is reached on trading-day N
+    # (not N+1) relative to the entry date, matching Phase 4 semantics.
+    max_committed = max((s.date for s in history), default=since)
+    if as_of > max_committed:
+        count += 1
+    return count
 
 
 def _execute_rebalance_step(
