@@ -299,40 +299,42 @@ def _count_trading_days_since(
     as_of: datetime.date,
     since: datetime.date,
 ) -> int:
-    """Count trading days the lifecycle has processed strictly after
+    """Count trading days the lifecycle has touched strictly after
     ``since`` and on-or-before ``as_of``.
 
-    Uses ``portfolio_state`` row count as the canonical definition of
-    "trading days the lifecycle has seen." This is self-consistent:
-    ``portfolio_state`` is written exactly once per trading day by
-    construction, so its row count between two dates IS the trading-day
-    distance.
+    Uses ``daily_runs`` row count, filtering out ``SKIPPED_HOLIDAY``
+    entries. A "touched" day is one the cron attempted to process —
+    features loaded, predictions ran, even if downstream classification
+    failed. ``DATA_STALE`` and ``FAILED`` days WERE processed and count;
+    ``SKIPPED_HOLIDAY`` days were filtered out before the lifecycle ran
+    and do not count.
 
-    When ``as_of`` is ahead of the latest committed ``portfolio_state`` row
-    (i.e., the current trading day has not yet been written), the function
-    adds +1 to account for the current day.  This keeps the lifecycle
-    cadence consistent with the Phase 4 stride schedule (``sorted_days[::20]``
-    fires on trading-day indices 0, 20, 40, …), which counts the current day
-    inclusive: a rebalance on day 0 followed by the next on day 20 means
-    exactly 20 trading days have elapsed.
+    This conceptual definition supersedes the ``portfolio_state``-based
+    definition from amendment ``afb5505``. The ``portfolio_state``
+    definition missed ``DATA_STALE`` days because those don't write a
+    ``portfolio_state`` row (the lifecycle's main transaction is skipped
+    on DATA_STALE per the spec section 9 retry contract). The
+    ``daily_runs`` definition counts what the cron has done, not what
+    produced clean output — proven correct by the 2026-01-16 cascade
+    in Phase 5 Task 7's second-tier parity failure.
 
     Trade-off vs alternatives:
-    - Calendar days x scalar: fragile, holiday-dependent. (Was the prior
-      buggy approach — returned raw calendar days against a trading-day
-      threshold, causing the rebalance schedule to fire on calendar-day-20
-      approximately trading-day-14 instead of trading-day-20.)
-    - OHLCV distinct dates: introduces a second source of truth.
+    - Calendar days x scalar: fragile, holiday-dependent. (Phase 5
+      Task 7 first-tier bug.)
+    - portfolio_state row count: misses DATA_STALE/FAILED days. (Phase 5
+      Task 7 second-tier bug.)
     - External trading calendar: another dependency, edge cases at NSE
       special / muhurat sessions.
     """
-    history = store.read_portfolio_history()
-    count = sum(1 for state in history if since < state.date <= as_of)
-    # If as_of is ahead of the most-recently committed portfolio_state row,
-    # the current trading day has not yet been committed.  Add +1 to count
-    # today so that the rebalance threshold is reached on trading-day N
-    # (not N+1) relative to the entry date, matching Phase 4 semantics.
-    max_committed = max((s.date for s in history), default=since)
-    if as_of > max_committed:
+    runs = store.read_runs_in_range(start=since, end=as_of)
+    count = sum(1 for run in runs if run.status != RunStatus.SKIPPED_HOLIDAY)
+    # ``daily_runs`` is the LAST write of a run (write-ordering invariant). When
+    # _check_rebalance is called at the start of run_daily, the current day
+    # (``as_of``) has not yet committed its daily_runs row. Add +1 to count
+    # today inclusive — matching the Phase 4 stride semantics where trading-day
+    # index 20 relative to the entry IS a rebalance day.
+    has_current_day_row = any(r.run_date == as_of for r in runs)
+    if not has_current_day_row:
         count += 1
     return count
 

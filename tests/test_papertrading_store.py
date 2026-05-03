@@ -501,3 +501,55 @@ def test_get_open_positions_empty_for_unknown_date(tmp_path: Path) -> None:
     s = _make_store(tmp_path)
     result = s.get_open_positions(datetime.date(2099, 12, 31))
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# 12. read_runs_in_range
+# ---------------------------------------------------------------------------
+
+
+def test_read_runs_in_range_excludes_start_includes_end(tmp_path: Path) -> None:
+    """Boundary: start is exclusive, end is inclusive."""
+    from datetime import UTC, date, datetime
+
+    store = _make_store(tmp_path)
+    # Insert runs at 3 consecutive dates
+    for d in [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)]:
+        store.write_daily_run(
+            RunRecord(
+                run_date=d,
+                run_timestamp=datetime(d.year, d.month, d.day, tzinfo=UTC),
+                status=RunStatus.SUCCESS,
+                git_sha="t",
+                source=RunSource.BACKTEST,
+            )
+        )
+    # Query (2024-01-01, 2024-01-03] → returns only 2024-01-02 and 2024-01-03
+    rows = store.read_runs_in_range(date(2024, 1, 1), date(2024, 1, 3))
+    assert [r.run_date for r in rows] == [date(2024, 1, 2), date(2024, 1, 3)]
+
+
+def test_read_runs_in_range_returns_all_statuses(tmp_path: Path) -> None:
+    """Filtering by status is the caller's job, not the store's. The
+    method returns all statuses (SUCCESS, DATA_STALE, FAILED, SKIPPED_HOLIDAY)."""
+    from datetime import UTC, date, datetime
+
+    store = _make_store(tmp_path)
+    statuses = [
+        RunStatus.SUCCESS,
+        RunStatus.DATA_STALE,
+        RunStatus.FAILED,
+        RunStatus.SKIPPED_HOLIDAY,
+    ]
+    for i, s in enumerate(statuses):
+        store.write_daily_run(
+            RunRecord(
+                run_date=date(2024, 1, 2 + i),
+                run_timestamp=datetime(2024, 1, 2 + i, tzinfo=UTC),
+                status=s,
+                git_sha="t",
+                source=RunSource.BACKTEST,
+            )
+        )
+    rows = store.read_runs_in_range(date(2024, 1, 1), date(2024, 1, 10))
+    assert {r.status for r in rows} == set(statuses)

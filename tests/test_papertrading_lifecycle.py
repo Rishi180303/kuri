@@ -734,7 +734,7 @@ def test_rebalance_cadence_skips_weekends(tmp_path: Path) -> None:
     migrate(db)
     store = PaperTradingStore(db)
 
-    # Seed 30 weekday-only portfolio_state rows + an open position with
+    # Seed 30 weekday-only portfolio_state + daily_runs rows + an open position with
     # entry_date = first day. Skip Saturdays and Sundays.
     weekdays: list[dt.date] = []
     d = dt.date(2024, 1, 1)
@@ -769,6 +769,17 @@ def test_rebalance_cadence_skips_weekends(tmp_path: Path) -> None:
                     mtm_value=1_000_000.0,
                 )
             ],
+        )
+        # _count_trading_days_since now reads daily_runs, not portfolio_state.
+        # Write a daily_runs row for each day so the counter has data.
+        store.write_daily_run(
+            RunRecord(
+                run_date=day,
+                run_timestamp=dt.datetime(day.year, day.month, day.day, tzinfo=dt.UTC),
+                status=RunStatus.SUCCESS,
+                git_sha="cadence-test",
+                source=RunSource.BACKTEST,
+            )
         )
 
     # Iterate _check_rebalance for each day; assert rebalance fires only at index 20
@@ -931,5 +942,86 @@ def test_rebalance_cadence_real_ohlcv_window(tmp_path: Path) -> None:
         assert (
             gap_trading == 20
         ), f"gap from {prev} to {curr} = {gap_trading} trading days, expected 20"
+
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# 12. Test C — DATA_STALE cadence: processed days must count toward distance
+# ---------------------------------------------------------------------------
+
+
+def test_count_trading_days_since_includes_data_stale(tmp_path: Path) -> None:
+    """A DATA_STALE day still counts toward the trading-day distance.
+
+    DATA_STALE means features loaded but downstream classification failed
+    (e.g. nifty_above_sma_200 was null on the feature_date). The cron
+    attempted to process the day; the cadence counter must include it.
+
+    This test exercises the exact bug from Phase 5 Task 7's second-tier
+    parity failure: a single DATA_STALE day on 2026-01-16 caused
+    subsequent rebalances to fire 1 trading day late under the prior
+    portfolio_state-based counter, accumulating to a 4.2% NAV gap by
+    early February 2026."""
+    import datetime as dt
+
+    from trading.papertrading.lifecycle import _count_trading_days_since
+    from trading.papertrading.types import RunRecord, RunSource, RunStatus
+
+    db = tmp_path / "test.db"
+    migrate(db)
+    store = PaperTradingStore(db)
+
+    # 21 consecutive weekdays, starting 2024-01-01 (a Monday)
+    weekdays: list[dt.date] = []
+    d = dt.date(2024, 1, 1)
+    while len(weekdays) < 21:
+        if d.weekday() < 5:
+            weekdays.append(d)
+        d += dt.timedelta(days=1)
+
+    # Insert daily_runs rows: 20 SUCCESS + 1 DATA_STALE in the middle (index 10)
+    for i, day in enumerate(weekdays):
+        status = RunStatus.DATA_STALE if i == 10 else RunStatus.SUCCESS
+        store.write_daily_run(
+            RunRecord(
+                run_date=day,
+                run_timestamp=dt.datetime(day.year, day.month, day.day, tzinfo=dt.UTC),
+                status=status,
+                git_sha="data-stale-cadence-test",
+                source=RunSource.BACKTEST,
+                n_picks_generated=10 if status == RunStatus.SUCCESS else 0,
+                error_message=None if status == RunStatus.SUCCESS else "synthetic stale",
+            )
+        )
+
+    # since = day 0 (the rebalance anchor); as_of = day 20 (the 21st weekday)
+    count = _count_trading_days_since(store, as_of=weekdays[20], since=weekdays[0])
+    assert count == 20, (
+        f"Expected 20 trading days touched (including the DATA_STALE day), "
+        f"got {count}. DATA_STALE days are processed days and must count "
+        f"toward the trading-day distance — see lifecycle.py docstring."
+    )
+
+    # Defensive: also check that SKIPPED_HOLIDAY days do NOT count
+    # Add a holiday between weekdays[20] and weekdays[20]+5 weekdays
+    holiday_date = weekdays[20] + dt.timedelta(days=1)  # next calendar day
+    store.write_daily_run(
+        RunRecord(
+            run_date=holiday_date,
+            run_timestamp=dt.datetime(
+                holiday_date.year, holiday_date.month, holiday_date.day, tzinfo=dt.UTC
+            ),
+            status=RunStatus.SKIPPED_HOLIDAY,
+            git_sha="data-stale-cadence-test",
+            source=RunSource.BACKTEST,
+            n_picks_generated=None,
+            error_message=None,
+        )
+    )
+    count_with_holiday = _count_trading_days_since(store, as_of=holiday_date, since=weekdays[0])
+    assert (
+        count_with_holiday == 20
+    ), f"SKIPPED_HOLIDAY day must NOT count, expected 20 still, got {count_with_holiday}."
 
     store.close()

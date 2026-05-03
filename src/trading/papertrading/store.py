@@ -147,6 +147,27 @@ class PaperTradingStore:
         ).fetchall()
         return [_row_to_state(r) for r in rows]
 
+    def read_runs_in_range(
+        self,
+        start: datetime.date,
+        end: datetime.date,
+    ) -> list[RunRecord]:
+        """Read all daily_runs rows with run_date strictly after ``start``
+        and on-or-before ``end``, ordered by run_date ascending.
+
+        Boundary convention matches the trading-day-counter use case:
+        ``start`` is the prior reference date (excluded), ``end`` is the
+        current date (included).
+        """
+        rows = self._conn.execute(
+            "SELECT run_date, run_timestamp, status, git_sha, source, "
+            "n_picks_generated, error_message, model_fold_id_used "
+            "FROM daily_runs WHERE run_date > ? AND run_date <= ? "
+            "ORDER BY run_date ASC",
+            (start.isoformat(), end.isoformat()),
+        ).fetchall()
+        return [_row_to_run(r) for r in rows]
+
     def read_predictions_for_date(self, target_date: datetime.date) -> list[DailyPrediction]:
         """Return all daily_predictions rows for ``target_date``.
 
