@@ -1,0 +1,26 @@
+Universe: 50 tickers
+Loading universe OHLCV (2018-01-01 → 2026-04-01) …
+OHLCV loaded: 101,850 rows
+Loading feature frame (2021-12-01 → 2026-04-01) …
+Feature frame loaded: 53,600 rows
+Trading days to process: 925 (2022-07-04 → 2026-04-01)
+Cold-start: seeded initial portfolio_state at 2022-07-01 with cash=1,000,000 INR
+Backfilled 50/925 trading days (5.4%) in 0.3s, ETA 19:34:55 UTC
+Backfilled 100/925 trading days (10.8%) in 0.6s, ETA 19:34:56 UTC
+Backfilled 150/925 trading days (16.2%) in 0.9s, ETA 19:34:56 UTC
+Backfilled 200/925 trading days (21.6%) in 1.2s, ETA 19:34:56 UTC
+Backfilled 250/925 trading days (27.0%) in 1.5s, ETA 19:34:56 UTC
+Backfilled 300/925 trading days (32.4%) in 1.8s, ETA 19:34:56 UTC
+Backfilled 350/925 trading days (37.8%) in 2.0s, ETA 19:34:56 UTC
+Backfilled 400/925 trading days (43.2%) in 2.3s, ETA 19:34:56 UTC
+Backfilled 450/925 trading days (48.6%) in 2.6s, ETA 19:34:56 UTC
+Backfilled 500/925 trading days (54.1%) in 2.8s, ETA 19:34:55 UTC
+Backfilled 550/925 trading days (59.5%) in 3.1s, ETA 19:34:55 UTC
+Backfilled 600/925 trading days (64.9%) in 3.3s, ETA 19:34:55 UTC
+Backfilled 650/925 trading days (70.3%) in 3.6s, ETA 19:34:55 UTC
+Backfilled 700/925 trading days (75.7%) in 4.0s, ETA 19:34:56 UTC
+Backfilled 750/925 trading days (81.1%) in 4.3s, ETA 19:34:56 UTC
+Backfilled 800/925 trading days (86.5%) in 4.7s, ETA 19:34:56 UTC
+Backfilled 850/925 trading days (91.9%) in 5.0s, ETA 19:34:56 UTC
+Backfilled 900/925 trading days (97.3%) in 5.2s, ETA 19:34:56 UTC
+Backfill complete: 925 succeeded, 0 failed, 0 skipped (already-existing). Total elapsed: 5.3s.
