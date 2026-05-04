@@ -6,7 +6,9 @@ The idea: every market day, fetch the latest NSE data, compute features, run the
 
 ## Stack
 
-Polars, DuckDB, Parquet, Pydantic for the data layer. Prefect 3 for orchestration. scikit-learn, LightGBM, PyTorch, pytorch-forecasting, Optuna for ML, with MLflow for tracking. vectorbt for backtesting (extended with Indian frictions). FastAPI plus Streamlit for serving and dashboard. PostgreSQL for portfolio state. Docker, GitHub Actions, and AWS for infra. Tooling is uv, ruff, mypy strict, pytest, structlog, pre-commit.
+Polars, DuckDB, Parquet, Pydantic for the data layer. Prefect 3 for orchestration. scikit-learn, LightGBM, Optuna for ML, with MLflow for tracking. SQLite for paper-trading state and Cloudflare R2 for durability across ephemeral cron runs. Tooling is uv, ruff, mypy strict, pytest, structlog, pre-commit.
+
+Planned: FastAPI for serving (Phase 6), Streamlit for the dashboard (Phase 7), Docker, GitHub Actions, and AWS for infra (Phase 8). PyTorch and pytorch-forecasting for advanced models are deferred (Phase 3 Chunk 3).
 
 ## Getting started
 
