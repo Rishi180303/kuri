@@ -1,0 +1,73 @@
+name: papertrading daily
+
+on:
+  schedule:
+    # 11:00 UTC = 16:30 IST = 1 hour after Indian market close at 15:30 IST.
+    # Weekdays only; NSE is closed on weekends.
+    - cron: "0 11 * * 1-5"
+  workflow_dispatch:  # manual trigger for testing
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # Endpoint constructed from R2_ACCOUNT_ID per ADR 0001 naming convention.
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install Python and dependencies
+        run: uv sync
+
+      - name: Download state.db from R2
+        run: |
+          mkdir -p data/papertrading
+          # First-ever-run safety: bucket may be empty before the user uploads
+          # the backfilled state.db. After that, this branch never triggers.
+          if aws s3 ls "s3://${R2_BUCKET}/state.db" --endpoint-url "$R2_ENDPOINT" > /dev/null 2>&1; then
+            aws s3 cp "s3://${R2_BUCKET}/state.db" data/papertrading/state.db \
+              --endpoint-url "$R2_ENDPOINT" \
+              --no-progress
+            echo "Downloaded state.db from R2"
+          else
+            echo "No state.db found in R2 - first run, will create fresh"
+          fi
+
+      - name: Run papertrading lifecycle
+        run: uv run kuri papertrading run
+
+      - name: Upload state.db to R2
+        if: always()  # Upload even if the run had non-fatal issues so DATA_STALE rows persist.
+        run: |
+          if [ -f data/papertrading/state.db ]; then
+            aws s3 cp data/papertrading/state.db "s3://${R2_BUCKET}/state.db" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --no-progress
+            echo "Uploaded state.db to R2"
+          else
+            echo "No state.db to upload - run did not create one"
+            exit 1
+          fi
+
+      - name: Open issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `papertrading workflow failed on ${new Date().toISOString().slice(0,10)}`,
+              body: `The daily papertrading workflow failed. Check the [run logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.`,
+              labels: ['papertrading', 'cron-failure']
+            });

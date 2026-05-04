@@ -31,6 +31,9 @@ Model subcommands (`kuri models ...`):
 
 Backtest subcommands (`kuri backtest ...`):
     run              run the primary backtest and write the pause-point headline
+
+Paper trading subcommands (`kuri papertrading ...`):
+    run              execute one daily run of the paper trading lifecycle
 """
 
 from __future__ import annotations
@@ -52,6 +55,9 @@ from trading.features.yaml_io import (
 )
 from trading.labels import LabelStore, compute_labels, label_columns_for_horizon
 from trading.logging import configure_logging, get_logger
+from trading.papertrading.lifecycle import run_daily
+from trading.papertrading.store import PaperTradingStore
+from trading.papertrading.types import RunSource
 from trading.pipelines.backfill import backfill_flow
 from trading.pipelines.update import daily_update_flow
 from trading.storage import DataStore, validate_ohlcv
@@ -80,6 +86,10 @@ backtest_app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="Backtest engine commands."
 )
 app.add_typer(backtest_app, name="backtest")
+papertrading_app = typer.Typer(
+    add_completion=False, no_args_is_help=True, help="Paper trading simulator commands."
+)
+app.add_typer(papertrading_app, name="papertrading")
 
 
 def _bootstrap_logging(verbose: bool) -> None:
@@ -897,6 +907,94 @@ def backtest_sensitivity(
             f"{name:>14s} | {m['cagr']*100:>+13.2f}% | {m['sharpe']:>13.2f} "
             f"| {m['alpha_annualized_vs_ew']*100:>+13.2f}% | {m['alpha_annualized_vs_nifty']*100:>+13.2f}%"
         )
+
+
+# ---------------------------------------------------------------------------
+# Paper trading subcommands
+# ---------------------------------------------------------------------------
+
+
+@papertrading_app.command("run")
+def papertrading_run(
+    target_date: str = typer.Option(
+        "",
+        "--target-date",
+        help="Trading day to process (ISO YYYY-MM-DD). Default: today (UTC on CI runners, local on workstations).",
+    ),
+    db_path: Path = typer.Option(  # noqa: B008
+        Path("data/papertrading/state.db"),
+        "--db-path",
+        help="Path to the SQLite state database.",
+    ),
+) -> None:
+    """Execute one daily run of the paper trading lifecycle.
+
+    Loads OHLCV (with 2018 warmup) and features (with 2021-12 warmup) for
+    the configured universe, builds a stitched predictions provider, then
+    invokes ``run_daily`` for ``target_date``.
+
+    Idempotent: if a SUCCESS daily_runs row already exists for ``target_date``,
+    ``run_daily`` returns early and the CLI prints the existing status.
+
+    Exit codes:
+      0 - success or DATA_STALE (a daily_runs row was written)
+      1 - unexpected failure (no daily_runs row written; safe to retry)
+    """
+    import datetime
+
+    from trading.backtest.data import load_universe_ohlcv
+    from trading.backtest.walk_forward_sim import FoldRouter, StitchedPredictionsProvider
+
+    if target_date:
+        try:
+            target = datetime.date.fromisoformat(target_date)
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"--target-date must be YYYY-MM-DD, got {target_date!r}"
+            ) from exc
+    else:
+        target = datetime.date.today()
+
+    universe_cfg = get_universe_config()
+    universe: list[str] = sorted(universe_cfg.symbols)
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    store = PaperTradingStore(db_path)
+
+    try:
+        universe_ohlcv = load_universe_ohlcv(start=datetime.date(2018, 1, 1), end=target)
+        feature_frame = load_training_data(
+            start=datetime.date(2021, 12, 1),
+            end=target,
+            horizons=(20,),
+            feature_version=2,
+            label_version=1,
+            drop_label_nulls=False,
+        )
+        router = FoldRouter.from_disk(Path("models/v1/lgbm"), embargo_days=5)
+        provider = StitchedPredictionsProvider(
+            fold_router=router, feature_frame=feature_frame, universe=universe
+        )
+
+        record = run_daily(
+            target,
+            store,
+            provider,
+            universe_ohlcv,
+            feature_frame,
+            source=RunSource.LIVE,
+        )
+    except Exception as exc:
+        typer.echo(f"papertrading run failed: {exc}", err=True)
+        store.close()
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(
+        f"{target} {record.status.value} "
+        f"picks={record.n_picks_generated if record.n_picks_generated is not None else '-'} "
+        f"fold={record.model_fold_id_used if record.model_fold_id_used is not None else '-'}"
+    )
+    store.close()
 
 
 if __name__ == "__main__":  # pragma: no cover
