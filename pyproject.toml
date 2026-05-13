@@ -101,6 +101,15 @@ disallow_untyped_decorators = false
 # correctness. Tests are the right place to relax these.
 disable_error_code = ["operator", "union-attr"]
 
+[[tool.mypy.overrides]]
+module = ["compare_v1_vs_v2", "explore"]
+# compare_v1_vs_v2 is a Phase 3 utility that emits a committed report; explore
+# is a gitignored local scratch file used across phases for ad-hoc audits. Both
+# are sufficiently outside the production code boundary that fixing their
+# pre-existing mypy noise inline would be busywork. Reconsider if Phase 3
+# Chunk 3 (TFT) resumes and compare_v1_vs_v2 gets reused.
+ignore_errors = true
+
 # ---------------------------------------------------------------------------
 # Pytest
 # ---------------------------------------------------------------------------
