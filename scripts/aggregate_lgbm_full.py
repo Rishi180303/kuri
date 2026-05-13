@@ -403,8 +403,7 @@ def render(report: dict[str, Any]) -> str:
         f"ideal 0.04: {'PASS' if d['ic_meets_ideal'] else 'BELOW'})"
     )
     lines.append(
-        f"  Shuffle p < 0.10 in every fold: "
-        f"{'PASS' if d['shuffle_all_below_10pct'] else 'FAIL'}"
+        f"  Shuffle p < 0.10 in every fold: {'PASS' if d['shuffle_all_below_10pct'] else 'FAIL'}"
     )
     lines.append(f"  Decision: PROCEED_TO_CHUNK_3 = {d['proceed_to_chunk_3']}")
 

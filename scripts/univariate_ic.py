@@ -272,13 +272,13 @@ def _format_per_category(table: pl.DataFrame, horizon: int, module_map: dict[str
             ic_ir = row["ic_ir"]
             if ic_ir is not None and np.isfinite(ic_ir):
                 lines.append(
-                    f"      top: {row['feature']:<32} " f"IR={ic_ir:>+6.3f}  p={row['p_value']:.4f}"
+                    f"      top: {row['feature']:<32} IR={ic_ir:>+6.3f}  p={row['p_value']:.4f}"
                 )
         for row in bot1.iter_rows(named=True):
             ic_ir = row["ic_ir"]
             if ic_ir is not None and np.isfinite(ic_ir):
                 lines.append(
-                    f"      bot: {row['feature']:<32} " f"IR={ic_ir:>+6.3f}  p={row['p_value']:.4f}"
+                    f"      bot: {row['feature']:<32} IR={ic_ir:>+6.3f}  p={row['p_value']:.4f}"
                 )
     return "\n".join(lines)
 

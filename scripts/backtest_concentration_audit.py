@@ -288,9 +288,9 @@ def main() -> None:
 
     baseline_alpha_vs_ew = baseline_strategy_cagr - ew_cagr_val
 
-    print(f"\nBaseline strategy CAGR (attribution model): {baseline_strategy_cagr*100:.2f}%")
-    print(f"EW CAGR (from ew_history):                  {ew_cagr_val*100:.2f}%")
-    print(f"Baseline alpha vs EW:                       {baseline_alpha_vs_ew*100:.2f}%")
+    print(f"\nBaseline strategy CAGR (attribution model): {baseline_strategy_cagr * 100:.2f}%")
+    print(f"EW CAGR (from ew_history):                  {ew_cagr_val * 100:.2f}%")
+    print(f"Baseline alpha vs EW:                       {baseline_alpha_vs_ew * 100:.2f}%")
 
     # Note: attribution CAGR will differ slightly from headline CAGR (27.62%)
     # because attribution uses adj_close price returns with nearest-date matching,
@@ -363,8 +363,8 @@ def main() -> None:
             )
         )
         print(
-            f"  K={k:2d}: cf_strategy_CAGR={cf_cagr*100:.2f}%  "
-            f"cf_alpha_vs_EW={cf_alpha*100:.2f}%  "
+            f"  K={k:2d}: cf_strategy_CAGR={cf_cagr * 100:.2f}%  "
+            f"cf_alpha_vs_EW={cf_alpha * 100:.2f}%  "
             f"alpha_drop={alpha_drop_bps:.0f} bps"
         )
 
@@ -525,9 +525,9 @@ Backtest window: {BACKTEST_START} to {BACKTEST_END} | {n_periods} rebalances
 Replacing the top-K contributors with EW benchmark return for all periods
 they were held. This isolates how much of the alpha depends on those tickers.
 
-Baseline strategy CAGR (attribution model): **{baseline_strategy_cagr*100:.2f}%**
-EW benchmark CAGR: **{ew_cagr_val*100:.2f}%**
-Baseline alpha vs EW: **{baseline_alpha_vs_ew*100:.2f}%**
+Baseline strategy CAGR (attribution model): **{baseline_strategy_cagr * 100:.2f}%**
+EW benchmark CAGR: **{ew_cagr_val * 100:.2f}%**
+Baseline alpha vs EW: **{baseline_alpha_vs_ew * 100:.2f}%**
 
 {fmt_table(cf_headers, cf_rows)}
 

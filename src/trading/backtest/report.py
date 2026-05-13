@@ -185,8 +185,8 @@ def render_headline_table(
         beta_v = m.get("beta", float("nan"))
         p_v = m.get("alpha_pvalue", float("nan"))
         out.append(
-            f"{name:<22s} {cagr_v*100:>7.2f}% {sharpe_v:>8.2f} {mdd_v*100:>7.2f}% "
-            f"{alpha_v*100:>7.2f}% {beta_v:>6.2f} {p_v:>6.3f}"
+            f"{name:<22s} {cagr_v * 100:>7.2f}% {sharpe_v:>8.2f} {mdd_v * 100:>7.2f}% "
+            f"{alpha_v * 100:>7.2f}% {beta_v:>6.2f} {p_v:>6.3f}"
         )
     out.append("-" * len(header))
     out.append(

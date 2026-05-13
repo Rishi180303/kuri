@@ -92,7 +92,7 @@ def load_training_data(
         label_frames.append(ldf.select(cols))
     if not label_frames:
         raise RuntimeError(
-            f"No labels found at {lstore.per_ticker_dir}. " "Run `kuri labels generate` first."
+            f"No labels found at {lstore.per_ticker_dir}. Run `kuri labels generate` first."
         )
     lbl = pl.concat(label_frames, how="vertical_relaxed").sort(["ticker", "date"])
 

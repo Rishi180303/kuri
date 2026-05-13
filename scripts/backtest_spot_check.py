@@ -176,9 +176,9 @@ def main() -> int:
             "",
             "Engine picks (ordered)    :",
             *[
-                f"  {i+1:2d}. {t:20s}  engine={engine_probas[i]:.4f}  repro={reproduced_probas[i]:.4f}"
+                f"  {i + 1:2d}. {t:20s}  engine={engine_probas[i]:.4f}  repro={reproduced_probas[i]:.4f}"
                 if has_probas
-                else f"  {i+1:2d}. {t}"
+                else f"  {i + 1:2d}. {t}"
                 for i, t in enumerate(engine_top10)
             ],
         ]

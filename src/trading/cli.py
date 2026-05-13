@@ -327,8 +327,7 @@ def features_inspect(
     """
     if category not in _INSPECT_CATEGORIES:
         typer.echo(
-            f"Invalid --category: {category!r}. "
-            f"Choose one of: {', '.join(_INSPECT_CATEGORIES)}."
+            f"Invalid --category: {category!r}. Choose one of: {', '.join(_INSPECT_CATEGORIES)}."
         )
         raise typer.Exit(code=2)
     if fmt not in ("table", "csv"):
@@ -887,9 +886,9 @@ def backtest_sensitivity(
     md.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for name, m in out.items():
         md.append(
-            f"| {name} | {m['cagr']*100:+.2f}% | {m['sharpe']:.2f} | {m['max_drawdown']*100:+.2f}% "
-            f"| {m['alpha_annualized_vs_ew']*100:+.2f}% | {m['alpha_pvalue_vs_ew']:.3f} "
-            f"| {m['alpha_annualized_vs_nifty']*100:+.2f}% | {m['alpha_pvalue_vs_nifty']:.3f} "
+            f"| {name} | {m['cagr'] * 100:+.2f}% | {m['sharpe']:.2f} | {m['max_drawdown'] * 100:+.2f}% "
+            f"| {m['alpha_annualized_vs_ew'] * 100:+.2f}% | {m['alpha_pvalue_vs_ew']:.3f} "
+            f"| {m['alpha_annualized_vs_nifty'] * 100:+.2f}% | {m['alpha_pvalue_vs_nifty']:.3f} "
             f"| {m['total_cost_inr']:,.0f} | {m['n_rebalances']:.0f} |"
         )
     md_path.write_text("\n".join(md) + "\n", encoding="utf-8")
@@ -904,8 +903,8 @@ def backtest_sensitivity(
     typer.echo("-" * 80)
     for name, m in out.items():
         typer.echo(
-            f"{name:>14s} | {m['cagr']*100:>+13.2f}% | {m['sharpe']:>13.2f} "
-            f"| {m['alpha_annualized_vs_ew']*100:>+13.2f}% | {m['alpha_annualized_vs_nifty']*100:>+13.2f}%"
+            f"{name:>14s} | {m['cagr'] * 100:>+13.2f}% | {m['sharpe']:>13.2f} "
+            f"| {m['alpha_annualized_vs_ew'] * 100:>+13.2f}% | {m['alpha_annualized_vs_nifty'] * 100:>+13.2f}%"
         )
 
 

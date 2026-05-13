@@ -224,7 +224,7 @@ def count_regime_holds(
 
 
 def pct(v: float) -> str:
-    return f"{v*100:.2f}%"
+    return f"{v * 100:.2f}%"
 
 
 def fmt_f(v: float, d: int = 2) -> str:
@@ -536,7 +536,7 @@ def main() -> None:
 
     # Section 1 — Headline side-by-side
     def md_pct(v: float) -> str:
-        return f"{v*100:.2f}%"
+        return f"{v * 100:.2f}%"
 
     section1_rows = [
         (
@@ -593,7 +593,7 @@ def main() -> None:
         f_ticker = frozen_top10_tickers[rank] if rank < len(frozen_top10_tickers) else "—"
         f_bps = frozen_top10_dict.get(f_ticker, float("nan"))
         f_bps_str = f"+{f_bps:.0f}" if f_bps >= 0 else f"{f_bps:.0f}"
-        s2_lines.append(f"| {rank+1} | {p_ticker} | +{p_bps:.0f} | {f_ticker} | {f_bps_str} |")
+        s2_lines.append(f"| {rank + 1} | {p_ticker} | +{p_bps:.0f} | {f_ticker} | {f_bps_str} |")
 
     overlap_note = (
         f"Set overlap of top-10 contributors: **{overlap_count} of 10** tickers shared"
