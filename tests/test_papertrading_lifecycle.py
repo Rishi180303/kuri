@@ -1025,3 +1025,168 @@ def test_count_trading_days_since_includes_data_stale(tmp_path: Path) -> None:
     ), f"SKIPPED_HOLIDAY day must NOT count, expected 20 still, got {count_with_holiday}."
 
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# 13. Test D — partial-universe feature_date triggers loud failure (NOT DATA_STALE)
+# ---------------------------------------------------------------------------
+
+
+def test_partial_universe_on_feature_date_raises_uncaught(tmp_path: Path) -> None:
+    """Structural test: missing-ticker on feature_date propagates uncaught.
+
+    Locks the current lifecycle contract that a partial-universe condition on
+    the predict's feature_date (the latest date strictly before target_date)
+    causes ``StitchedPredictionsProvider.predict_for`` to raise ``ValueError``,
+    which propagates uncaught past ``run_daily``'s try/except boundary and
+    leaves NO ``daily_runs`` row written. This is the deliberate "loud
+    failure, retry next run" design — see the ``run_daily`` docstring section
+    on exception narrowness ("Do not widen the except clause").
+
+    Validated empirically by the LTM rename episode: NSE renamed LTIM to LTM
+    effective 2026-02-27 and yfinance kept the LTIM.NS alias for roughly two
+    months until it expired around 2026-04-27, at which point one universe
+    ticker started showing partial-universe on feature_date. The loud crash
+    forced timely root-cause investigation of the NSE symbol change rather
+    than hiding it as a passive ``DATA_STALE`` row that would have ridden the
+    cron quietly.
+
+    Failure modes this test locks:
+
+    * Widening the try/except in ``run_daily`` to catch the provider's
+      ``ValueError`` would let a daily_runs row get written instead of the
+      exception propagating — fails this test.
+    * Moving the ``predictions_provider.predict_for`` call inside the
+      existing try/except block has the same effect — fails this test.
+    * Removing the partial-universe check at
+      ``src/trading/backtest/walk_forward_sim.py:148-154`` would let the
+      lifecycle proceed with N-1 predictions silently — fails this test.
+    """
+    import datetime as dt
+
+    if not Path("models/v1/lgbm/fold_9").exists():
+        pytest.skip("real fold artifacts not present")
+    if not Path("data/features/v2").exists():
+        pytest.skip("v2 feature store not present")
+
+    from trading.backtest.data import load_universe_ohlcv
+    from trading.backtest.walk_forward_sim import (
+        FoldRouter,
+        StitchedPredictionsProvider,
+    )
+    from trading.config import get_universe_config
+    from trading.training.data import load_training_data
+
+    universe = sorted(t.symbol for t in get_universe_config().tickers)
+    # Deterministic choice: first ticker alphabetically. Any single missing
+    # ticker triggers the provider's height-mismatch check the same way.
+    missing_ticker = universe[0]
+
+    # Pick a target_date well inside the Phase 4 fold window so fold_9 exists
+    # for it and the surrounding features are populated.
+    target_date = dt.date(2024, 6, 20)
+    seed_date = target_date - dt.timedelta(days=5)
+
+    # Load real OHLCV (full universe — the partial-universe failure is on the
+    # feature-frame side, not the OHLCV side).
+    ohlcv = load_universe_ohlcv(start=dt.date(2018, 1, 1), end=target_date)
+
+    # Load real feature_frame, then surgically drop ONE ticker's row on the
+    # exact feature_date the provider will look at. All other dates remain
+    # intact for that ticker, and all other tickers remain intact on
+    # feature_date.
+    feature_frame_full = load_training_data(
+        start=dt.date(2021, 12, 1),
+        end=target_date,
+        horizons=(20,),
+        feature_version=2,
+        label_version=1,
+        drop_label_nulls=False,
+    )
+
+    feat_dates_before = (
+        feature_frame_full.filter(pl.col("date") < target_date).select("date").unique().sort("date")
+    )
+    assert not feat_dates_before.is_empty(), "fixture invalid: no feature rows before target_date"
+    feature_date = feat_dates_before["date"].to_list()[-1]
+
+    feature_frame = feature_frame_full.filter(
+        ~((pl.col("date") == feature_date) & (pl.col("ticker") == missing_ticker))
+    )
+
+    # Sanity-check the fixture: feature_date now has exactly universe_size - 1
+    # tickers, and target_date is unaffected.
+    fd_tickers = feature_frame.filter(pl.col("date") == feature_date)["ticker"].n_unique()
+    assert fd_tickers == len(universe) - 1, (
+        f"fixture invalid: feature_date {feature_date} should have "
+        f"{len(universe) - 1} tickers after drop, got {fd_tickers}"
+    )
+
+    # Seed the store with a prior portfolio_state row so the lifecycle has a
+    # valid starting point. n_positions=0 means the rebalance check will trip
+    # the empty-positions branch and return is_rebalance_day=True, which puts
+    # run_daily on the path that calls predict_for — exactly what we want to
+    # exercise.
+    db = tmp_path / "test.db"
+    migrate(db)
+    store = PaperTradingStore(db)
+    store.write_main_transaction(
+        seed_date,
+        [],
+        None,
+        PortfolioStateRow(
+            date=seed_date,
+            total_value=1_000_000.0,
+            cash=1_000_000.0,
+            n_positions=0,
+            gross_value=0.0,
+            regime_label=RegimeLabel.CHOPPY,
+            source=RunSource.BACKTEST,
+        ),
+        [],
+    )
+    store.write_daily_run(
+        RunRecord(
+            run_date=seed_date,
+            run_timestamp=datetime.datetime.now(datetime.UTC),
+            status=RunStatus.SUCCESS,
+            git_sha="test-D-seed",
+            source=RunSource.BACKTEST,
+        )
+    )
+
+    # Use the real provider so the actual partial-universe check fires.
+    router = FoldRouter.from_disk(Path("models/v1/lgbm"), embargo_days=5)
+    provider = StitchedPredictionsProvider(router, feature_frame, universe)
+
+    # Act + assert: the provider's ValueError must propagate uncaught past
+    # run_daily's try/except.
+    with pytest.raises(ValueError, match="Missing feature rows on"):
+        run_daily(
+            target_date,
+            store,
+            provider,
+            ohlcv,
+            feature_frame,
+            source=RunSource.BACKTEST,
+            git_sha="test-D",
+        )
+
+    # No daily_runs row should have been written for target_date. If this trips,
+    # someone widened the try/except in run_daily or otherwise softened the
+    # loud-failure contract documented in the run_daily docstring.
+    assert store.get_run(target_date) is None, (
+        f"no daily_runs row should have been written for {target_date}; "
+        "partial-universe is a hard failure, not DATA_STALE"
+    )
+
+    # The latest portfolio_state must still be the seeded prior date — no new
+    # row got committed for target_date because the main transaction was never
+    # reached.
+    latest = store.get_latest_portfolio_state()
+    assert latest is not None, "seeded portfolio_state should still exist"
+    assert latest.date == seed_date, (
+        f"latest portfolio_state should still be the seed date {seed_date}, " f"got {latest.date}"
+    )
+
+    store.close()
