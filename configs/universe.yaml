@@ -51,7 +51,7 @@ tickers:
   - { symbol: JSWSTEEL,    sector: "Metals & Mining" }
   - { symbol: KOTAKBANK,   sector: "Financial Services" }
   - { symbol: LT,          sector: "Construction" }
-  - { symbol: LTIM,        sector: "IT" }
+  - { symbol: LTM,         sector: "IT" }
   - { symbol: M&M,         sector: "Automobile" }
   - { symbol: MARUTI,      sector: "Automobile" }
   - { symbol: NESTLEIND,   sector: "Consumer Goods" }
