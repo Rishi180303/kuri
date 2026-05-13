@@ -36,6 +36,10 @@ Marginal alpha vs the equal-weight benchmark is +5.72% (p=0.169) — directional
 
 See `reports/backtest_v2/SUMMARY.md` for the full report (verification findings, regime breakdown, sensitivity sweep, plots).
 
+## Daily operation
+
+The system runs autonomously via GitHub Actions cron at 11:00 UTC on weekdays (16:30 IST, about one hour after the Indian market close). State persists across ephemeral runners through Cloudflare R2: `state.db` plus the runtime data prefixes (raw OHLCV, features, labels, models) sync down at job start and back up at job end. Backfilling the simulator from 2022-07-04 reproduces Phase 4's `portfolio_history.csv` to 1.30e-15 relative tolerance — the daily lifecycle is a methodologically faithful wrapper around the backtest engine, not a reimplementation. Daily picks are written to a SQLite database; surfacing them to humans is the Phase 7 dashboard's job.
+
 ## Layout
 
 ```
