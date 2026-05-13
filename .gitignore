@@ -62,6 +62,9 @@ scripts/explore.py
 # --- Local-only build progress tracker ---
 PHASES.md
 
+# --- Local-only chat handoff doc (resumes context in fresh sessions) ---
+HANDOFF.md
+
 # --- OS junk ---
 .DS_Store
 .AppleDouble
