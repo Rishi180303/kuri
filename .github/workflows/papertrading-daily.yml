@@ -56,6 +56,8 @@ jobs:
             --endpoint-url "$R2_ENDPOINT" --no-progress
           aws s3 sync "s3://${R2_BUCKET}/runtime/models/v1/" models/v1/ \
             --endpoint-url "$R2_ENDPOINT" --no-progress
+          aws s3 sync "s3://${R2_BUCKET}/runtime/labels/" data/labels/ \
+            --endpoint-url "$R2_ENDPOINT" --no-progress
           echo "Synced runtime data from R2"
 
       - name: Fetch today's OHLCV
