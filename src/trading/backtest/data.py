@@ -23,9 +23,11 @@ def load_universe_ohlcv(
 ) -> pl.DataFrame:
     """Load OHLCV for every universe ticker into one frame.
 
-    The universe is the configured 49-ticker Nifty 50 set (TATAMOTORS
-    excluded). Returns columns ``[date, ticker, open, high, low, close,
-    volume, adj_close]`` sorted by ``(ticker, date)``.
+    The universe is the configured 50-ticker Nifty 50 set (TATAMOTORS
+    excluded due to a broken yfinance feed post-Oct-2024 demerger, plus a
+    post-Phase-4 replacement that brings the count back to 50). Returns
+    columns ``[date, ticker, open, high, low, close, volume, adj_close]``
+    sorted by ``(ticker, date)``.
     """
     cfg_paths = data_dir if data_dir is not None else get_pipeline_config().paths.data_dir
     store = DataStore(cfg_paths)

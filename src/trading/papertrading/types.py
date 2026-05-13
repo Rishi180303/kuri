@@ -49,7 +49,7 @@ class RunRecord:
 
 @dataclass(frozen=True)
 class DailyPrediction:
-    """One row of `daily_predictions`. Written every trading day for all 49 tickers."""
+    """One row of `daily_predictions`. Written every trading day for all 50 tickers."""
 
     run_date: datetime.date
     ticker: str

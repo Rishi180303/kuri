@@ -108,7 +108,7 @@ def run_daily(
         predictions_provider: stitched walk-forward provider; must expose
             ``predict_for(date)`` and a ``._router`` attribute used to
             resolve ``fold_id``.
-        universe_ohlcv: full OHLCV frame for the 49-ticker universe (all
+        universe_ohlcv: full OHLCV frame for the 50-ticker universe (all
             history; the engine needs warmup rows before target_date).
         feature_frame: joined feature frame from load_training_data;
             used for regime-feature extraction.
