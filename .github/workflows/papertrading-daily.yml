@@ -12,6 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    permissions:
+      contents: read
+      issues: write
+
     env:
       # Endpoint constructed from R2_ACCOUNT_ID per ADR 0001 naming convention.
       R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
@@ -44,8 +48,34 @@ jobs:
             echo "No state.db found in R2 - first run, will create fresh"
           fi
 
+      - name: Sync runtime data from R2
+        run: |
+          aws s3 sync "s3://${R2_BUCKET}/runtime/raw/" data/raw/ \
+            --endpoint-url "$R2_ENDPOINT" --no-progress
+          aws s3 sync "s3://${R2_BUCKET}/runtime/features/" data/features/ \
+            --endpoint-url "$R2_ENDPOINT" --no-progress
+          aws s3 sync "s3://${R2_BUCKET}/runtime/models/v1/" models/v1/ \
+            --endpoint-url "$R2_ENDPOINT" --no-progress
+          echo "Synced runtime data from R2"
+
+      - name: Fetch today's OHLCV
+        run: uv run kuri update
+
+      - name: Recompute features through today
+        run: uv run kuri features update
+
       - name: Run papertrading lifecycle
         run: uv run kuri papertrading run
+
+      - name: Sync runtime data back to R2
+        if: always()  # Upload partial state even if lifecycle had a non-fatal issue.
+        run: |
+          aws s3 sync data/raw/ "s3://${R2_BUCKET}/runtime/raw/" \
+            --endpoint-url "$R2_ENDPOINT" --no-progress
+          aws s3 sync data/features/ "s3://${R2_BUCKET}/runtime/features/" \
+            --endpoint-url "$R2_ENDPOINT" --no-progress
+          echo "Synced runtime data back to R2"
+          # models/v1/ deliberately not uploaded — read-only in CI per ADR 0002.
 
       - name: Upload state.db to R2
         if: always()  # Upload even if the run had non-fatal issues so DATA_STALE rows persist.
