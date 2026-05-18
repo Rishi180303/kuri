@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 10
 
     permissions:
-      contents: read
+      contents: write  # the dashboard step commits dashboard/data.json back to main
       issues: write
 
     env:
@@ -157,6 +157,21 @@ jobs:
           else
             echo "No state.db to upload - run did not create one"
             exit 1
+          fi
+
+      - name: Build and publish dashboard data
+        if: always()
+        continue-on-error: true  # dashboard publish is convenience; never fail the cron on it
+        run: |
+          uv run kuri dashboard build
+          if [ -n "$(git status --porcelain dashboard/data.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add dashboard/data.json
+            git commit -m "update dashboard data $(date -u +%Y-%m-%d)"
+            git push origin "HEAD:${{ github.ref_name }}"
+          else
+            echo "No changes to dashboard/data.json"
           fi
 
       - name: Open issue on failure
