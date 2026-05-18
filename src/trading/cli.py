@@ -90,6 +90,10 @@ papertrading_app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="Paper trading simulator commands."
 )
 app.add_typer(papertrading_app, name="papertrading")
+dashboard_app = typer.Typer(
+    add_completion=False, no_args_is_help=True, help="Phase 7 dashboard commands."
+)
+app.add_typer(dashboard_app, name="dashboard")
 
 
 def _bootstrap_logging(verbose: bool) -> None:
@@ -994,6 +998,59 @@ def papertrading_run(
         f"fold={record.model_fold_id_used if record.model_fold_id_used is not None else '-'}"
     )
     store.close()
+
+
+@dashboard_app.command("build")
+def dashboard_build(
+    db_path: Path = typer.Option(  # noqa: B008
+        Path("data/papertrading/state.db"),
+        "--db-path",
+        help="Path to the paper trading SQLite database.",
+    ),
+    nifty50_csv: Path = typer.Option(  # noqa: B008
+        Path("reports/backtest_v2/nifty50_history.csv"),
+        "--nifty50-csv",
+        help="Phase 4 Nifty 50 history CSV (used for the backtest segment).",
+    ),
+    ew_nifty49_csv: Path = typer.Option(  # noqa: B008
+        Path("reports/backtest_v2/ew_nifty49_history.csv"),
+        "--ew-csv",
+        help="Phase 4 equal-weight Nifty 49 history CSV.",
+    ),
+    output_path: Path = typer.Option(  # noqa: B008
+        Path("dashboard/data.json"),
+        "--output",
+        help="Where to write the dashboard JSON.",
+    ),
+) -> None:
+    """Build the Phase 7 dashboard data artifact from the paper-trading state.db.
+
+    Reads state.db plus the Phase 4 benchmark CSVs and writes a single
+    pretty-printed ``dashboard.json``. Stage 1 of Phase 7 — the Streamlit
+    page itself is Stage 2.
+    """
+    import subprocess
+
+    from trading.dashboard.build_data import build_dashboard_data, write_dashboard_json
+
+    try:
+        git_sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        git_sha = ""
+
+    data = build_dashboard_data(
+        db_path=db_path,
+        nifty50_csv=nifty50_csv,
+        ew_nifty49_csv=ew_nifty49_csv,
+        generator_git_sha=git_sha,
+    )
+    write_dashboard_json(data, output_path)
+    typer.echo(f"wrote {output_path}")
 
 
 if __name__ == "__main__":  # pragma: no cover
