@@ -59,9 +59,6 @@ GEMINI.md
 # --- Local-only audit / exploration scripts ---
 scripts/explore.py
 
-# --- Local-only build progress tracker ---
-PHASES.md
-
 # --- Local-only chat handoff doc (resumes context in fresh sessions) ---
 HANDOFF.md
 
