@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from datetime import date, timedelta
 from pathlib import Path
@@ -9,6 +10,14 @@ from pathlib import Path
 import polars as pl
 import pytest
 from prefect.testing.utilities import prefect_test_harness
+
+# ``dashboard/`` lives at the repo root and is not part of the installed ``trading``
+# package. Adding the repo root to ``sys.path`` lets tests under ``tests/`` import
+# ``dashboard.formatting`` directly. The dashboard app itself is a separate Streamlit
+# deploy artifact; this is purely for unit testing the pure helper module.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 @pytest.fixture(autouse=True, scope="session")

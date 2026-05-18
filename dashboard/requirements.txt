@@ -1,0 +1,7 @@
+# Deps for the Phase 7 Streamlit dashboard. Pinned so Streamlit Community
+# Cloud rebuilds match local dev. The trading package and its heavy ML deps
+# (polars, duckdb, lightgbm, etc.) are intentionally NOT here — the page
+# reads dashboard/data.json only and stays decoupled from the model code.
+
+streamlit==1.40.2
+plotly==5.24.1
