@@ -36,11 +36,30 @@ jobs:
 
       - name: Download state.db from R2
         run: |
+          # Retry wrapper: re-attempt the wrapped command up to 3 times with a
+          # 15s sleep between attempts. Defends against transient Cloudflare
+          # InternalError responses on individual R2 ops. aws s3 cp / sync are
+          # idempotent and convergent, so a retry simply re-attempts whatever
+          # the previous attempt didn't finish.
+          retry() {
+            local n=0
+            local max=3
+            local delay=15
+            until "$@"; do
+              n=$((n + 1))
+              if [ $n -ge $max ]; then
+                echo "retry: command failed after $max attempts: $*" >&2
+                return 1
+              fi
+              echo "retry: attempt $n/$max failed, sleeping ${delay}s before retry" >&2
+              sleep $delay
+            done
+          }
           mkdir -p data/papertrading
           # First-ever-run safety: bucket may be empty before the user uploads
           # the backfilled state.db. After that, this branch never triggers.
           if aws s3 ls "s3://${R2_BUCKET}/state.db" --endpoint-url "$R2_ENDPOINT" > /dev/null 2>&1; then
-            aws s3 cp "s3://${R2_BUCKET}/state.db" data/papertrading/state.db \
+            retry aws s3 cp "s3://${R2_BUCKET}/state.db" data/papertrading/state.db \
               --endpoint-url "$R2_ENDPOINT" \
               --no-progress
             echo "Downloaded state.db from R2"
@@ -50,13 +69,28 @@ jobs:
 
       - name: Sync runtime data from R2
         run: |
-          aws s3 sync "s3://${R2_BUCKET}/runtime/raw/" data/raw/ \
+          # See "Download state.db from R2" for retry rationale.
+          retry() {
+            local n=0
+            local max=3
+            local delay=15
+            until "$@"; do
+              n=$((n + 1))
+              if [ $n -ge $max ]; then
+                echo "retry: command failed after $max attempts: $*" >&2
+                return 1
+              fi
+              echo "retry: attempt $n/$max failed, sleeping ${delay}s before retry" >&2
+              sleep $delay
+            done
+          }
+          retry aws s3 sync "s3://${R2_BUCKET}/runtime/raw/" data/raw/ \
             --endpoint-url "$R2_ENDPOINT" --no-progress
-          aws s3 sync "s3://${R2_BUCKET}/runtime/features/" data/features/ \
+          retry aws s3 sync "s3://${R2_BUCKET}/runtime/features/" data/features/ \
             --endpoint-url "$R2_ENDPOINT" --no-progress
-          aws s3 sync "s3://${R2_BUCKET}/runtime/models/v1/" models/v1/ \
+          retry aws s3 sync "s3://${R2_BUCKET}/runtime/models/v1/" models/v1/ \
             --endpoint-url "$R2_ENDPOINT" --no-progress
-          aws s3 sync "s3://${R2_BUCKET}/runtime/labels/" data/labels/ \
+          retry aws s3 sync "s3://${R2_BUCKET}/runtime/labels/" data/labels/ \
             --endpoint-url "$R2_ENDPOINT" --no-progress
           echo "Synced runtime data from R2"
 
@@ -72,9 +106,27 @@ jobs:
       - name: Sync runtime data back to R2
         if: always()  # Upload partial state even if lifecycle had a non-fatal issue.
         run: |
-          aws s3 sync data/raw/ "s3://${R2_BUCKET}/runtime/raw/" \
+          # See "Download state.db from R2" for retry rationale. This step was
+          # the specific failure mode for scheduled run #12 on 2026-05-14 —
+          # 4 of ~49 ticker uploads hit transient Cloudflare InternalError;
+          # retry-wrapping eliminates that class of cron failure.
+          retry() {
+            local n=0
+            local max=3
+            local delay=15
+            until "$@"; do
+              n=$((n + 1))
+              if [ $n -ge $max ]; then
+                echo "retry: command failed after $max attempts: $*" >&2
+                return 1
+              fi
+              echo "retry: attempt $n/$max failed, sleeping ${delay}s before retry" >&2
+              sleep $delay
+            done
+          }
+          retry aws s3 sync data/raw/ "s3://${R2_BUCKET}/runtime/raw/" \
             --endpoint-url "$R2_ENDPOINT" --no-progress
-          aws s3 sync data/features/ "s3://${R2_BUCKET}/runtime/features/" \
+          retry aws s3 sync data/features/ "s3://${R2_BUCKET}/runtime/features/" \
             --endpoint-url "$R2_ENDPOINT" --no-progress
           echo "Synced runtime data back to R2"
           # models/v1/ deliberately not uploaded — read-only in CI per ADR 0002.
@@ -82,8 +134,23 @@ jobs:
       - name: Upload state.db to R2
         if: always()  # Upload even if the run had non-fatal issues so DATA_STALE rows persist.
         run: |
+          # See "Download state.db from R2" for retry rationale.
+          retry() {
+            local n=0
+            local max=3
+            local delay=15
+            until "$@"; do
+              n=$((n + 1))
+              if [ $n -ge $max ]; then
+                echo "retry: command failed after $max attempts: $*" >&2
+                return 1
+              fi
+              echo "retry: attempt $n/$max failed, sleeping ${delay}s before retry" >&2
+              sleep $delay
+            done
+          }
           if [ -f data/papertrading/state.db ]; then
-            aws s3 cp data/papertrading/state.db "s3://${R2_BUCKET}/state.db" \
+            retry aws s3 cp data/papertrading/state.db "s3://${R2_BUCKET}/state.db" \
               --endpoint-url "$R2_ENDPOINT" \
               --no-progress
             echo "Uploaded state.db to R2"
