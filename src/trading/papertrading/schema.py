@@ -2,15 +2,24 @@
 """SQLite schema for the paper trading simulator.
 
 Schema is forward-only; migrations bump the version number and add tables
-or columns but never DROP. The migration runner is idempotent — running
-:func:`migrate` against an already-current database is a no-op.
+or columns. The single exception is a CHECK-constraint widening (v2), where
+a temporary copy-and-rename rebuild is the only way SQLite supports
+modifying a column-level CHECK — the rebuild is non-destructive (every row
+is preserved via ``INSERT INTO ... SELECT * FROM``). The migration runner
+is idempotent — running :func:`migrate` against an already-current database
+is a no-op.
 
 Spec contradiction: the design spec section 6 had FOREIGN KEY constraints
 from daily_picks and daily_predictions to daily_runs. Section 10's
 "Write ordering invariant" requires daily_runs to be written LAST. With
 ``PRAGMA foreign_keys = ON``, those FKs would block the main transaction.
 We drop them here. The position->portfolio_state FK is preserved (both
-are written in the same main transaction; FK is appropriate)."""
+are written in the same main transaction; FK is appropriate).
+
+Schema v2 (2026-05-19): widens the ``portfolio_state.regime_label`` CHECK
+to allow the new ``unknown`` enum value. The lifecycle now writes
+``regime_label='unknown'`` when a derived regime input is null instead of
+raising and aborting the whole transaction (Phase 5 DATA_STALE cascade fix)."""
 
 from __future__ import annotations
 
@@ -18,7 +27,7 @@ import datetime
 import sqlite3
 from pathlib import Path
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 _SCHEMA_V1 = [
     """
@@ -97,8 +106,11 @@ def migrate(db_path: Path) -> None:
         current = _read_version(conn)
         if current >= CURRENT_SCHEMA_VERSION:
             return
-        for stmt in _SCHEMA_V1:
-            conn.execute(stmt)
+        if current < 1:
+            for stmt in _SCHEMA_V1:
+                conn.execute(stmt)
+        if current < 2:
+            _apply_v2_migration(conn)
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version, applied) VALUES (?, ?)",
             (
@@ -107,6 +119,54 @@ def migrate(db_path: Path) -> None:
             ),
         )
         conn.commit()
+
+
+def _apply_v2_migration(conn: sqlite3.Connection) -> None:
+    """v1 → v2: widen the ``portfolio_state.regime_label`` CHECK to allow
+    ``'unknown'``.
+
+    SQLite has no direct support for altering a column's CHECK constraint,
+    so the standard pattern is: create a new table with the desired
+    constraint, copy data in, drop the old table, rename the new one. The
+    ``positions(date)`` foreign key references ``portfolio_state(date)``
+    with ``ON DELETE CASCADE``; if FK enforcement were on during the drop,
+    every position would cascade-delete. We disable FKs for the rebuild
+    and restore them after — this is the SQLite-documented safe migration
+    pattern for table redefinition with dependents.
+
+    The rebuild is non-destructive: every existing ``portfolio_state`` row
+    is preserved by the ``INSERT INTO ... SELECT *`` step.
+    """
+    # PRAGMA foreign_keys can only be toggled outside an active transaction.
+    # Commit anything pending so the toggle takes effect.
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN")
+        conn.execute(
+            """
+            CREATE TABLE portfolio_state_v2 (
+                date          TEXT PRIMARY KEY,
+                total_value   REAL NOT NULL,
+                cash          REAL NOT NULL,
+                n_positions   INTEGER NOT NULL,
+                gross_value   REAL NOT NULL,
+                regime_label  TEXT NOT NULL CHECK (regime_label IN
+                                  ('calm_bull', 'trending_bull', 'choppy',
+                                   'high_vol_bear', 'unknown')),
+                source        TEXT NOT NULL CHECK (source IN ('backtest', 'live'))
+            )
+            """
+        )
+        conn.execute("INSERT INTO portfolio_state_v2 SELECT * FROM portfolio_state")
+        conn.execute("DROP TABLE portfolio_state")
+        conn.execute("ALTER TABLE portfolio_state_v2 RENAME TO portfolio_state")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def get_schema_version(db_path: Path) -> int:

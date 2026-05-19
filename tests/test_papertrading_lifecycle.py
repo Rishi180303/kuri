@@ -421,6 +421,116 @@ def test_nan_features_produce_data_stale_no_main_transaction(tmp_path: Path) -> 
 
 
 # ---------------------------------------------------------------------------
+# 5b. Derived-feature null → non-blocking UNKNOWN (Phase 5 DATA_STALE fix)
+# ---------------------------------------------------------------------------
+
+
+def test_vol_regime_null_for_all_tickers_returns_unknown_status_success(
+    tmp_path: Path,
+) -> None:
+    """When ``vol_regime`` is null for every ticker on the feature date, the
+    lifecycle must NOT abort the main transaction. Instead the regime label
+    falls back to ``UNKNOWN``, the pick + portfolio_state get written
+    normally, and ``status=SUCCESS`` with a diagnostic recorded in
+    ``error_message``.
+
+    This pins the structural fix for the 2026-05-13..19 production
+    DATA_STALE cascade: ``vol_regime`` was null for every ticker on every
+    cron day because ``kuri features update``'s 400-day window yielded only
+    ~271 trading days (one short of the 272-day vol_regime warmup), and the
+    OLD lifecycle raised on that null and aborted every main transaction.
+    Regime is metadata; the LightGBM model does not consume it; a
+    feature-pipeline warmup miss must not block five consecutive days of
+    live operations."""
+    db = tmp_path / "test.db"
+    migrate(db)
+    seed = datetime.date(2024, 1, 1)
+    target = datetime.date(2024, 1, 2)
+
+    real_store = PaperTradingStore(db)
+    _seed_initial_state(real_store, seed)
+    real_store.close()
+
+    # Build a feature frame where vol_regime is null for every ticker on
+    # the feature date (target - 1). Other regime inputs remain valid.
+    features = _make_feature_frame().with_columns(
+        pl.when(pl.col("date") == datetime.date(2024, 1, 1))
+        .then(pl.lit(None, dtype=pl.Int64))
+        .otherwise(pl.col("vol_regime"))
+        .alias("vol_regime")
+    )
+    ohlcv = _make_ohlcv()
+    provider = _SyntheticProvider(TICKERS)
+
+    store = PaperTradingStore(db)
+    record = run_daily(target, store, provider, ohlcv, features, source=RunSource.BACKTEST)
+    store.close()
+
+    # Critical: status=SUCCESS, NOT data_stale.
+    assert record.status == RunStatus.SUCCESS
+    # Diagnostic surfaces in error_message so the regression remains visible.
+    assert record.error_message is not None
+    assert "regime fell back to UNKNOWN" in record.error_message
+    assert "vol_regime is null" in record.error_message
+
+    # portfolio_state row WAS written (main transaction committed), with
+    # the UNKNOWN regime_label.
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT regime_label, source FROM portfolio_state WHERE date = ?",
+            (target.isoformat(),),
+        ).fetchone()
+    assert row is not None, "portfolio_state row missing — main transaction did not commit"
+    assert row[0] == "unknown"
+    assert row[1] == "backtest"
+
+
+def test_nifty_above_sma_200_null_for_all_tickers_returns_unknown_status_success(
+    tmp_path: Path,
+) -> None:
+    """Symmetric to vol_regime: a null ``nifty_above_sma_200`` on the
+    feature date falls back to UNKNOWN, status=SUCCESS, diagnostic recorded.
+
+    This is the 2026-01-16 one-day index-feature gap class (a single Friday
+    where the SMA-200 feature came out null because the Nifty close was
+    missing for that date) — non-blocking from now on."""
+    db = tmp_path / "test.db"
+    migrate(db)
+    seed = datetime.date(2024, 1, 1)
+    target = datetime.date(2024, 1, 2)
+
+    real_store = PaperTradingStore(db)
+    _seed_initial_state(real_store, seed)
+    real_store.close()
+
+    features = _make_feature_frame().with_columns(
+        pl.when(pl.col("date") == datetime.date(2024, 1, 1))
+        .then(pl.lit(None, dtype=pl.Int64))
+        .otherwise(pl.col("nifty_above_sma_200"))
+        .alias("nifty_above_sma_200")
+    )
+    ohlcv = _make_ohlcv()
+    provider = _SyntheticProvider(TICKERS)
+
+    store = PaperTradingStore(db)
+    record = run_daily(target, store, provider, ohlcv, features, source=RunSource.BACKTEST)
+    store.close()
+
+    assert record.status == RunStatus.SUCCESS
+    assert record.error_message is not None
+    assert "regime fell back to UNKNOWN" in record.error_message
+    assert "nifty_above_sma_200 is null" in record.error_message
+
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT regime_label FROM portfolio_state WHERE date = ?",
+            (target.isoformat(),),
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "unknown"
+
+
+# ---------------------------------------------------------------------------
 # 6. Mid-transaction failure → no daily_runs row
 # ---------------------------------------------------------------------------
 

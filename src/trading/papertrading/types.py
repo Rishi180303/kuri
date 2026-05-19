@@ -31,6 +31,15 @@ class RegimeLabel(StrEnum):
     TRENDING_BULL = "trending_bull"
     CHOPPY = "choppy"
     HIGH_VOL_BEAR = "high_vol_bear"
+    # Added 2026-05-19 (schema v2). Used when a derived regime input
+    # (vol_regime, nifty_above_sma_200) is null on the latest feature date —
+    # the lifecycle's ``_extract_regime_label`` returns ``UNKNOWN`` instead
+    # of raising so the main transaction still commits with a pick and a
+    # portfolio_state row. A genuinely missing broad-market index series
+    # (NSEI rows < 61) still raises and the run is DATA_STALE; regime
+    # metadata being unknown is non-blocking, raw market data being absent
+    # is blocking. See the lifecycle and schema docstrings.
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)

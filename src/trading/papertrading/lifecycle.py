@@ -23,11 +23,25 @@ Retry contract
 
 Exception narrowness
 ====================
-The ``try/except`` in :func:`run_daily` catches **only** ``ValueError`` (from
-:func:`classify_regime` when regime inputs are NaN). Any other exception
-(``KeyError`` on missing OHLCV, ``RuntimeError`` from ``FoldRouter``, etc.)
-propagates as a hard failure, leaving **no** ``daily_runs`` row — which is the
-retry signal for unexpected failures. Do not widen the ``except`` clause.
+The ``try/except`` in :func:`run_daily` catches **only** ``ValueError`` from
+``_extract_regime_label`` — raised exclusively when raw market data is
+absent (no feature rows before target, or the NSEI parquet has fewer than
+61 rows in the 60-day lookback). Any other exception (``KeyError`` on
+missing OHLCV, ``RuntimeError`` from ``FoldRouter``, etc.) propagates as a
+hard failure, leaving **no** ``daily_runs`` row — which is the retry signal
+for unexpected failures. Do not widen the ``except`` clause.
+
+Regime non-blocking contract (since 2026-05-19)
+================================================
+Derived regime inputs (``vol_regime``, ``nifty_above_sma_200``) being null
+for every ticker on the feature date does NOT raise. Instead
+``_extract_regime_label`` returns ``(RegimeLabel.UNKNOWN, diagnostic_str)``
+and ``run_daily`` writes the main transaction with the UNKNOWN regime
+label and ``status=SUCCESS`` while recording the diagnostic in
+``error_message`` so the regression stays visible. The LightGBM model does
+not consume ``regime_label``; it is metadata, and a feature-pipeline issue
+must not block live operations. The 2026-05-13..19 DATA_STALE cascade was
+the direct evidence that this needs to be non-blocking.
 
 See docs/superpowers/specs/2026-05-03-phase5-papertrading-design.md,
 Sections 7 and 10.
@@ -203,21 +217,28 @@ def run_daily(
             )
             n_picks_generated = 0
 
-        # Step 8a: compute regime label from features at t-1
-        regime_label = _extract_regime_label(
+        # Step 8a: compute regime label from features at t-1. Derived-feature
+        # nulls (vol_regime, nifty_above_sma_200) return UNKNOWN with a
+        # diagnostic string — non-blocking; the pick is still produced and
+        # the diagnostic surfaces on the daily_runs row. Only raw market
+        # data outages (no feature rows, short NSEI history) raise here.
+        regime_label, regime_diagnostic = _extract_regime_label(
             target_date=target_date,
             feature_frame=feature_frame,
             universe_ohlcv=universe_ohlcv,
         )
-        # Attach regime label to the portfolio state row
         new_state = dataclasses.replace(new_state, regime_label=regime_label)
+        if regime_diagnostic is not None:
+            error_message = f"regime fell back to UNKNOWN: {regime_diagnostic}"
 
-        # Step 8b: COMMIT MAIN TRANSACTION
+        # Step 8b: COMMIT MAIN TRANSACTION. Reached even when regime is
+        # UNKNOWN — regime is metadata, not on the critical path.
         store.write_main_transaction(target_date, predictions, picks, new_state, new_positions)
 
     except ValueError as exc:
-        # Regime classifier raised on NaN inputs — DATA_STALE path.
-        # The main transaction was NOT committed; all other tables are clean.
+        # Raw market data outage (NSEI parquet incomplete or no feature
+        # rows before target). The main transaction was NOT committed;
+        # all other tables are clean.
         status = RunStatus.DATA_STALE
         error_message = f"regime classification failed: {exc}"
         n_picks_generated = 0
@@ -481,8 +502,31 @@ def _extract_regime_label(
     target_date: datetime.date,
     feature_frame: pl.DataFrame,
     universe_ohlcv: pl.DataFrame,
-) -> RegimeLabel:
-    """Extract regime inputs at t-1 (lookahead-safe) and return regime label.
+) -> tuple[RegimeLabel, str | None]:
+    """Extract regime inputs at t-1 and return ``(label, diagnostic)``.
+
+    Returns:
+        ``(RegimeLabel, None)`` on success — every input was usable.
+        ``(RegimeLabel.UNKNOWN, "...")`` when a DERIVED regime input is null
+        (e.g. ``vol_regime`` or ``nifty_above_sma_200`` is null for every
+        ticker on the latest feature date). Regime is metadata; the LightGBM
+        model does not consume it, so a derived-feature null must not abort
+        the main transaction. The lifecycle records the diagnostic on the
+        ``daily_runs`` row so a real feature regression stays visible.
+
+    Raises:
+        ValueError: only when raw market data itself is missing — no feature
+        rows before ``target_date``, or the NSEI parquet has fewer than 61
+        rows in the 60-trading-day lookback window. These represent a
+        genuine data outage (not a derived-feature warmup issue) and the
+        lifecycle correctly classifies the day as DATA_STALE.
+
+    The asymmetry — derived-feature null → UNKNOWN non-blocking; raw index
+    series absent → ValueError blocking — encodes the methodology decision
+    from the 2026-05-19 DATA_STALE post-mortem: regime metadata being
+    unknown is OK (the pick is still produced); raw broad-market data being
+    absent is not (the day's predictions would be built on a compromised
+    data foundation).
 
     Args:
         target_date: the trading day being processed.
@@ -490,9 +534,6 @@ def _extract_regime_label(
             ``vol_regime``, and ``nifty_above_sma_200`` columns.
         universe_ohlcv: not used for regime (NSEI return is computed
             inline); kept for potential future extension.
-
-    Raises:
-        ValueError: if ``nifty_60d_return`` is NaN (DATA_STALE trigger).
     """
     # Latest feature date strictly before target_date (lookahead-safe)
     feat_dates_before = (
@@ -502,30 +543,38 @@ def _extract_regime_label(
         raise ValueError(f"No feature rows before {target_date}; cannot extract regime inputs.")
     feature_date = feat_dates_before["date"].to_list()[-1]
 
-    # Extract vol_regime and nifty_above_sma_200 from feature_frame at feature_date
-    # vol_regime is a per-ticker feature — take the first available ticker's value
-    # (all tickers share the same regime on a given date)
     regime_slice = feature_frame.filter(pl.col("date") == feature_date)
     if regime_slice.is_empty():
         raise ValueError(f"No feature rows on {feature_date} for regime extraction.")
 
-    # vol_regime: per-ticker but market-wide — take first non-null value
+    # vol_regime: derived feature (252-day percentile of realized_vol_20d).
+    # Null-for-all-tickers means a feature-pipeline warmup or computation
+    # issue; non-blocking → UNKNOWN.
     vol_regime_col = regime_slice["vol_regime"].drop_nulls()
     if vol_regime_col.is_empty():
-        raise ValueError(f"vol_regime is null for all tickers on {feature_date}.")
+        return (
+            RegimeLabel.UNKNOWN,
+            f"vol_regime is null for all tickers on {feature_date}",
+        )
     vol_regime = int(vol_regime_col[0])
 
-    # nifty_above_sma_200: joined from regime features (same value for all tickers)
+    # nifty_above_sma_200: derived feature (200-day SMA of Nifty close).
+    # Null-for-all-tickers is the 2026-01-16 class of one-day index-feature
+    # gap; non-blocking → UNKNOWN.
     nifty_sma_col = regime_slice["nifty_above_sma_200"].drop_nulls()
     if nifty_sma_col.is_empty():
-        raise ValueError(f"nifty_above_sma_200 is null for all tickers on {feature_date}.")
+        return (
+            RegimeLabel.UNKNOWN,
+            f"nifty_above_sma_200 is null for all tickers on {feature_date}",
+        )
     nifty_above_sma_200 = int(nifty_sma_col[0])
 
-    # nifty_60d_return: load NSEI directly per spec Section 9 (cap-weighted
-    # broad-market index, not a constituent statistic).
+    # nifty_60d_return: computed inline from the NSEI raw parquet. NaN here
+    # means the broad-market index series itself is short or non-finite —
+    # qualitatively different from a derived-feature null. Stay blocking.
     nifty_60d_return = _compute_nifty_60d_return(feature_date)
 
-    return classify_regime(vol_regime, nifty_above_sma_200, nifty_60d_return)
+    return (classify_regime(vol_regime, nifty_above_sma_200, nifty_60d_return), None)
 
 
 def _compute_nifty_60d_return(feature_date: datetime.date) -> float:

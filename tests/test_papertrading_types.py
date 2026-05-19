@@ -46,6 +46,9 @@ def test_regime_label_members() -> None:
         "trending_bull",
         "choppy",
         "high_vol_bear",
+        # Added in schema v2 (2026-05-19): non-blocking fallback when a
+        # derived regime input (vol_regime, nifty_above_sma_200) is null.
+        "unknown",
     }
 
 
