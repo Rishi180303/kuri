@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-19T13:57:24.057983+00:00",
-  "generator_git_sha": "9eead99",
+  "generated_at": "2026-05-19T23:44:59.750142+00:00",
+  "generator_git_sha": "c965672",
   "freshness": {"latest_run_date": "2026-05-19", "latest_run_timestamp": "2026-05-19T13:57:17.819640+00:00", "latest_run_status": "success", "latest_run_source": "live"},
   "todays_picks": {
     "date": "2026-05-19",
