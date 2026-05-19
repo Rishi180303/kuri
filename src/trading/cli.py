@@ -44,6 +44,18 @@ import polars as pl
 import typer
 
 from trading.config import get_pipeline_config, get_universe_config
+from trading.dashboard.build_data import (
+    DEFAULT_DB_PATH as DEFAULT_DASHBOARD_DB_PATH,
+)
+from trading.dashboard.build_data import (
+    DEFAULT_EW_NIFTY49_CSV as DEFAULT_DASHBOARD_EW_NIFTY49_CSV,
+)
+from trading.dashboard.build_data import (
+    DEFAULT_NIFTY50_CSV as DEFAULT_DASHBOARD_NIFTY50_CSV,
+)
+from trading.dashboard.build_data import (
+    DEFAULT_OUTPUT_PATH as DEFAULT_DASHBOARD_OUTPUT_PATH,
+)
 from trading.data.ohlcv import parse_iso_date
 from trading.features.config import FeatureConfig, FeatureMeta
 from trading.features.pipeline import all_metas, make_default_pipeline
@@ -1003,22 +1015,22 @@ def papertrading_run(
 @dashboard_app.command("build")
 def dashboard_build(
     db_path: Path = typer.Option(  # noqa: B008
-        Path("data/papertrading/state.db"),
+        DEFAULT_DASHBOARD_DB_PATH,
         "--db-path",
         help="Path to the paper trading SQLite database.",
     ),
     nifty50_csv: Path = typer.Option(  # noqa: B008
-        Path("reports/backtest_v2/nifty50_history.csv"),
+        DEFAULT_DASHBOARD_NIFTY50_CSV,
         "--nifty50-csv",
         help="Phase 4 Nifty 50 history CSV (used for the backtest segment).",
     ),
     ew_nifty49_csv: Path = typer.Option(  # noqa: B008
-        Path("reports/backtest_v2/ew_nifty49_history.csv"),
+        DEFAULT_DASHBOARD_EW_NIFTY49_CSV,
         "--ew-csv",
         help="Phase 4 equal-weight Nifty 49 history CSV.",
     ),
     output_path: Path = typer.Option(  # noqa: B008
-        Path("dashboard/data.json"),
+        DEFAULT_DASHBOARD_OUTPUT_PATH,
         "--output",
         help="Where to write the dashboard JSON.",
     ),

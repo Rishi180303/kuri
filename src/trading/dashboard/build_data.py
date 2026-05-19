@@ -28,6 +28,18 @@ from trading.papertrading.types import (
 DASHBOARD_SCHEMA_VERSION = 1
 REBALANCE_FREQ_DAYS = 20
 
+# Default I/O paths. All are relative to the repo root (i.e. CWD when the cron
+# and local commands run). The benchmark CSVs live under ``dashboard/`` and are
+# tracked in git: Phase 7 Stage 1's original defaults pointed at
+# ``reports/backtest_v2/`` which is gitignored, so the actions/checkout runner
+# hit FileNotFoundError on every run (caught by run #15's red dashboard step on
+# 2026-05-19). Keeping these as module-level constants lets tests assert they
+# resolve to committed files.
+DEFAULT_DB_PATH = Path("data/papertrading/state.db")
+DEFAULT_NIFTY50_CSV = Path("dashboard/nifty50_history.csv")
+DEFAULT_EW_NIFTY49_CSV = Path("dashboard/ew_nifty49_history.csv")
+DEFAULT_OUTPUT_PATH = Path("dashboard/data.json")
+
 
 def build_dashboard_data(
     *,

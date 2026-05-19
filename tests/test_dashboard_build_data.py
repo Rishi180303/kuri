@@ -18,7 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from trading.dashboard.build_data import build_dashboard_data, write_dashboard_json
+from trading.dashboard.build_data import (
+    DEFAULT_EW_NIFTY49_CSV,
+    DEFAULT_NIFTY50_CSV,
+    build_dashboard_data,
+    write_dashboard_json,
+)
 from trading.papertrading.store import PaperTradingStore
 from trading.papertrading.types import (
     DailyPick,
@@ -711,3 +716,44 @@ def test_write_dashboard_json_keeps_scalar_objects_on_a_single_line(
         # The collapsed object must parse standalone.
         parsed = json.loads(stripped)
         assert isinstance(parsed, dict)
+
+
+# ---------------------------------------------------------------------------
+# Runner-correctness: default benchmark CSV paths must be tracked in git
+# ---------------------------------------------------------------------------
+
+
+def test_default_benchmark_csv_paths_are_tracked_in_git_and_readable() -> None:
+    """The benchmark CSV defaults must point at files ``actions/checkout`` sees.
+
+    Phase 7 Stage 1 originally set the defaults to ``reports/backtest_v2/*.csv``,
+    which is gitignored. Local generations always passed (the CSVs exist locally
+    from the Phase 4 backtest run) but cron run #15 on 2026-05-19 hit
+    ``FileNotFoundError`` on the first execution of the dashboard step because
+    ``actions/checkout`` only sees tracked files. This test pins the contract by
+    asking git itself — not the filesystem — so it stays runner-correct even on
+    a machine where the gitignored Phase 4 outputs happen to exist alongside.
+    """
+    import subprocess
+
+    repo_root = Path(__file__).resolve().parent.parent
+    paths = [str(DEFAULT_NIFTY50_CSV), str(DEFAULT_EW_NIFTY49_CSV)]
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", *paths],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"benchmark CSV defaults must be tracked in git so they exist on the "
+        f"actions/checkout runner. paths checked: {paths}. git stderr: "
+        f"{result.stderr.strip()!r}"
+    )
+    # Defense in depth: also confirm the tracked content is the expected CSV
+    # shape, so a future move to a wrong-but-tracked file still fails loudly.
+    for path in (DEFAULT_NIFTY50_CSV, DEFAULT_EW_NIFTY49_CSV):
+        first_line = (repo_root / path).read_text().splitlines()[0]
+        assert (
+            first_line == "date,total_value"
+        ), f"{path} header is {first_line!r}; expected 'date,total_value'"
