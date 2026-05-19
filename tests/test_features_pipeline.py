@@ -187,3 +187,127 @@ def test_pipeline_special_session_masking(
         assert any(
             on_special[c].drop_nulls().len() > 0 for c in keep_cols_with_data
         ), "no KEEP feature has any value on special session — masking too aggressive"
+
+
+# ---------------------------------------------------------------------------
+# Regression: ``vol_regime`` 272-trading-day warmup binds ``features_update``
+# ---------------------------------------------------------------------------
+
+
+def test_vol_regime_warmup_binds_features_update_window(
+    tmp_path: Path, universe: UniverseConfig
+) -> None:
+    """``vol_regime`` requires 272 trading days warmup; pinning the threshold
+    here so a future shrink of ``features_update``'s window that drops below
+    it fails CI.
+
+    The binding constraint: ``vol_regime`` is a 252-trading-day rolling
+    percentile of ``realized_vol_20d`` (which itself has a 20-trading-day
+    warmup), so the effective warmup is 252 + 20 = **272 trading days**.
+
+    Production constants (in calendar days, NSE density ≈ 271/400 = 0.68):
+      * Old setting: 400 calendar days → ~271 trading days. **One short.**
+        Every recomputed date emitted vol_regime=NaN for every ticker, the
+        lifecycle's regime extraction raised, and the cron cascaded into
+        DATA_STALE for 5 consecutive days (2026-05-13..19).
+      * New setting: 500 calendar days → ~357 trading days. ~85-day headroom.
+
+    Synthetic OHLCV here has 1:1 calendar:trading-day correspondence (no
+    weekend skips), so the threshold can be expressed directly in trading
+    days. Two windows side-by-side prove the binding constraint:
+      * 271 trading days in the window → vol_regime null on every date
+      * 300 trading days in the window → vol_regime non-null on recent dates
+    """
+    # Build a DataStore with enough synthetic history for the longer window.
+    store = DataStore(tmp_path / "data")
+    df = synthetic_ohlcv(tickers=universe.symbols, n_days=350)
+    for sym in universe.symbols:
+        store.save_ohlcv(sym, df.filter(pl.col("ticker") == sym))
+    nifty = (
+        df.group_by("date")
+        .agg(pl.col("close").mean().alias("close"))
+        .sort("date")
+        .with_columns(
+            pl.lit("^NSEI").alias("ticker"),
+            pl.col("close").alias("open"),
+            pl.col("close").alias("high"),
+            pl.col("close").alias("low"),
+            pl.lit(0).cast(pl.Int64).alias("volume"),
+            pl.col("close").alias("adj_close"),
+        )
+        .select(["date", "ticker", "open", "high", "low", "close", "volume", "adj_close"])
+    )
+    store.save_index("^NSEI", nifty)
+    vix = (
+        df.group_by("date")
+        .agg(pl.col("close").std().alias("close"))
+        .sort("date")
+        .with_columns(pl.col("close").fill_null(15.0))
+        .with_columns(
+            pl.lit("^INDIAVIX").alias("ticker"),
+            pl.col("close").alias("open"),
+            pl.col("close").alias("high"),
+            pl.col("close").alias("low"),
+            pl.lit(0).cast(pl.Int64).alias("volume"),
+            pl.col("close").alias("adj_close"),
+        )
+        .select(["date", "ticker", "open", "high", "low", "close", "volume", "adj_close"])
+    )
+    store.save_index("^INDIAVIX", vix)
+
+    cfg = FeatureConfig()
+    feature_store_path = tmp_path / "features"
+
+    sample_dates = pl.read_parquet(store.ohlcv_dir / "ticker=AAA" / "data.parquet")[
+        "date"
+    ].to_list()
+    cal = fixed_calendar(sample_dates)
+
+    def _build(start_offset_days: int) -> pl.DataFrame:
+        from datetime import timedelta
+
+        pipeline = FeaturePipeline(
+            store=store,
+            feature_store=FeatureStore(feature_store_path, version=2),
+            universe=universe,
+            calendar=cal,
+            cfg=cfg,
+        )
+        latest = max(sample_dates)
+        # start_offset_days = N means start = latest - N days; window length
+        # = N + 1 trading days inclusive (because synthetic dates are sequential).
+        start = latest - timedelta(days=start_offset_days)
+        result = pipeline.compute_all(start=start, end=latest, persist=False)
+        pt = result["per_ticker_df"]
+        assert isinstance(pt, pl.DataFrame)
+        return pt
+
+    # Window too short: 271 trading days = 270 day-offset (inclusive both ends).
+    pt_short = _build(start_offset_days=270)
+    n_dates_short = pt_short["date"].n_unique()
+    assert (
+        n_dates_short == 271
+    ), f"setup: expected 271 trading days in the short window, got {n_dates_short}"
+    non_null_short = pt_short.filter(pl.col("vol_regime").is_not_null()).height
+    assert non_null_short == 0, (
+        f"binding-constraint regression: at 271 trading days vol_regime should "
+        f"be null for every ticker on every date (needs 272 warmup), but "
+        f"{non_null_short} non-null rows were emitted. This is the failure mode "
+        f"that took live cron DATA_STALE for 5 days 2026-05-13..19."
+    )
+
+    # Window sufficient: 300 trading days = 299 day-offset.
+    pt_long = _build(start_offset_days=299)
+    n_dates_long = pt_long["date"].n_unique()
+    assert (
+        n_dates_long == 300
+    ), f"setup: expected 300 trading days in the long window, got {n_dates_long}"
+    last_date = pt_long["date"].max()
+    non_null_on_last = pt_long.filter(
+        (pl.col("date") == last_date) & pl.col("vol_regime").is_not_null()
+    ).height
+    assert non_null_on_last == len(universe.symbols), (
+        f"binding-constraint regression: at 300 trading days vol_regime should "
+        f"be non-null on the latest date for every ticker, but only "
+        f"{non_null_on_last} of {len(universe.symbols)} were non-null."
+    )

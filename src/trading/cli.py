@@ -271,10 +271,19 @@ def features_update() -> None:
     latest = max(latest_dates)
     cfg = FeatureConfig()
     pipeline = make_default_pipeline(cfg)
-    # Recompute the last 300 days to give long-window features (200-SMA) a buffer.
+    # Recompute window must comfortably exceed the longest-warmup feature.
+    # The binding constraint is ``vol_regime``: a 252-trading-day percentile of
+    # ``realized_vol_20d`` (which itself has a 20-trading-day warmup), so the
+    # effective warmup is 272 trading days. ~500 calendar days yields ~357
+    # trading days — ~85 days of headroom over the 272 minimum, with buffer for
+    # NSE holiday clustering. The earlier value of 400 calendar days yielded
+    # only ~271 trading days, one short of the 272 needed, which silently set
+    # ``vol_regime`` to NaN on every recomputed date and cascaded the lifecycle
+    # into DATA_STALE for five consecutive cron days (2026-05-13..19). The
+    # regression test in ``tests/test_features_pipeline.py`` pins both bounds.
     from datetime import timedelta
 
-    res = pipeline.compute_all(start=latest - timedelta(days=400), end=latest)
+    res = pipeline.compute_all(start=latest - timedelta(days=500), end=latest)
     typer.echo(
         f"Features updated through {latest}: rows={res['per_ticker_rows']}, "
         f"seconds={res['seconds']}"
