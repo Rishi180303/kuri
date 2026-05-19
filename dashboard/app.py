@@ -58,13 +58,15 @@ _ALERT_BY_KIND = {
 }
 
 
-def _render_header(data: dict[str, Any]) -> None:
+def _render_header(data: dict[str, Any], *, freshness_label: str) -> None:
+    """Header receives the IST freshness label pre-built by ``main`` so it
+    cannot drift from the footer's. See the structural-invariant test in
+    ``tests/test_dashboard_app_helpers.py``.
+    """
     st.title("kuri")
-    freshness = data["freshness"]
-    when = ist_freshness_label(freshness["latest_run_timestamp"])
-    badge_text, badge_kind = freshness_badge(freshness["latest_run_status"])
+    badge_text, badge_kind = freshness_badge(data["freshness"]["latest_run_status"])
     alert = _ALERT_BY_KIND.get(badge_kind, st.info)
-    alert(f"Data as of {when}. {badge_text}")
+    alert(f"Data as of {freshness_label}. {badge_text}")
 
 
 def _render_honesty_band() -> None:
@@ -252,13 +254,15 @@ def _render_rank_movement(data: dict[str, Any]) -> None:
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
-def _render_footer(data: dict[str, Any]) -> None:
-    freshness = data["freshness"]
-    when = ist_freshness_label(freshness["latest_run_timestamp"])
+def _render_footer(*, freshness_label: str) -> None:
+    """Footer receives the same IST freshness label as the header by
+    construction, not by a parallel ``ist_freshness_label`` call that
+    happens to match. The structural-invariant test pins this contract.
+    """
     st.divider()
     st.caption(
-        f"Last updated {when}. kuri is a research project — the picks on this "
-        "page are not financial advice."
+        f"Last updated {freshness_label}. kuri is a research project — the picks "
+        "on this page are not financial advice."
     )
 
 
@@ -267,14 +271,19 @@ def main() -> None:
     if data is None:
         st.error("Dashboard data is temporarily unavailable. Please check back shortly.")
         st.stop()
-    _render_header(data)
+    # Build the IST freshness label EXACTLY ONCE and pass it to both the
+    # header badge and the footer. This is the only call to
+    # ist_freshness_label in this module — see the structural-invariant
+    # test for the contract.
+    freshness_label = ist_freshness_label(data["freshness"]["latest_run_timestamp"])
+    _render_header(data, freshness_label=freshness_label)
     _render_honesty_band()
     _render_todays_picks(data)
     _render_timing(data)
     _render_value_curve(data)
     _render_last_completed_window(data)
     _render_rank_movement(data)
-    _render_footer(data)
+    _render_footer(freshness_label=freshness_label)
 
 
 main()

@@ -118,3 +118,80 @@ def test_pct_change_label_uses_arrows_and_one_decimal() -> None:
     assert pct_change_label(entry_price=100.0, current_mark=121.9) == "▲ 21.9%"
     assert pct_change_label(entry_price=100.0, current_mark=99.1) == "▼ 0.9%"
     assert pct_change_label(entry_price=100.0, current_mark=100.0) == "▲ 0.0%"
+
+
+# ---------------------------------------------------------------------------
+# Structural invariant: header and footer share the IST freshness label by
+# construction, not by parallel ist_freshness_label calls that happen to match.
+# ---------------------------------------------------------------------------
+
+
+def test_app_constructs_freshness_label_once_and_threads_it_to_header_and_footer() -> None:
+    """``main()`` must call ``ist_freshness_label`` exactly once and pass the
+    result to both ``_render_header`` and ``_render_footer``; neither renderer
+    may construct its own.
+
+    Stage 2's footer reads the same ``freshness.latest_run_timestamp`` field
+    as the header, so the rendered strings are already identical TODAY — but
+    that contract is fragile. A future refactor that moves one renderer to a
+    different timestamp field or a different label helper would silently let
+    the two drift, and the page would show two different "last updated"
+    values. Sharing the constructed string by parameter passing closes that
+    drift surface: there is exactly one ``ist_freshness_label`` call site,
+    and both renderers see the same string by construction.
+
+    A subagent that "tidies" by inlining the construction inside
+    ``_render_header`` or ``_render_footer`` silently reintroduces the
+    parallel-call surface. This test catches that refactor.
+
+    The test parses ``dashboard/app.py`` as AST rather than importing the
+    module, so it does not require ``streamlit``/``plotly`` to be installed
+    in the test environment.
+    """
+    import ast
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    tree = ast.parse((repo_root / "dashboard" / "app.py").read_text())
+
+    counts: dict[str, int] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            n = 0
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call):
+                    fn = sub.func
+                    if (isinstance(fn, ast.Name) and fn.id == "ist_freshness_label") or (
+                        isinstance(fn, ast.Attribute) and fn.attr == "ist_freshness_label"
+                    ):
+                        n += 1
+            counts[node.name] = n
+
+    assert counts.get("main") == 1, (
+        f"main() must call ist_freshness_label exactly once "
+        f"(got {counts.get('main')}); parallel calls invite drift."
+    )
+    for renderer in ("_render_header", "_render_footer"):
+        assert counts.get(renderer, 0) == 0, (
+            f"{renderer} must receive the freshness label as a parameter, "
+            f"not construct its own (got {counts.get(renderer)} call(s))."
+        )
+
+    # The renderers must actually reference ``freshness_label`` (so the
+    # parameter isn't just declared and ignored). Read the source bodies.
+    src = (repo_root / "dashboard" / "app.py").read_text()
+    func_starts = {
+        node.name: node.lineno for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+    lines = src.splitlines()
+    for renderer in ("_render_header", "_render_footer"):
+        start = func_starts[renderer] - 1
+        # Walk forward to the next top-level def or EOF
+        end = len(lines)
+        for other_name, other_start in func_starts.items():
+            if other_name != renderer and other_start - 1 > start:
+                end = min(end, other_start - 1)
+        body = "\n".join(lines[start:end])
+        assert (
+            "freshness_label" in body
+        ), f"{renderer} must reference the freshness_label parameter in its body."
