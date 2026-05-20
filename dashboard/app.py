@@ -555,10 +555,15 @@ def _render_value_curve(data: dict[str, Any]) -> None:
         # (it computes a numeric midpoint internally). Draw the line and
         # place the annotation explicitly.
         fig.add_vline(x=live_start, line_dash="dot", line_color=_ACCENT, line_width=1)
+        # ``live_start`` is near the right edge of the chart, so anchoring
+        # the annotation text to its right side (``xanchor='right'``) makes
+        # it extend LEFTWARD from the marker and stay inside the plot area.
+        # The previous default-center anchor clipped the trailing letters.
         fig.add_annotation(
             x=live_start,
             y=1.02,
             yref="paper",
+            xanchor="right",
             text="live tracking begins",
             showarrow=False,
             font={"size": 11, "color": _ACCENT, "family": "Inter, sans-serif"},
@@ -754,15 +759,20 @@ def main() -> None:
     # removed per Rishi's call on 2026-05-20.
     _render_header(data, freshness_label=freshness_label)
 
-    # Two-column dashboard: left 60% picks + timing; right 40% chart + window.
-    # CSS media query at 900px stacks them with picks first on mobile.
+    # Two-column dashboard: left 60% value chart + last-window (the chart is
+    # the visual anchor of the page and needs the wider column to render
+    # without crowding); right 40% today's picks + timing. CSS media query
+    # at 900px stacks them on mobile — left column comes first in source
+    # order, so on mobile the chart appears above the picks. If the
+    # mobile-first "picks above the fold" framing matters more than the
+    # desktop visual hierarchy, swap the column contents back.
     left, right = st.columns([3, 2], gap="large")
     with left:
-        _render_todays_picks(data)
-        _render_timing(data)
-    with right:
         _render_value_curve(data)
         _render_last_completed_window(data)
+    with right:
+        _render_todays_picks(data)
+        _render_timing(data)
 
     # Full-width below: rank expander + footer.
     _render_rank_movement(data)
