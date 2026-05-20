@@ -69,15 +69,6 @@ def _load_data() -> dict[str, Any] | None:
         return None
 
 
-# Maps the freshness badge's alert kind to the dot color in the pill.
-_BADGE_DOT_COLOR_BY_KIND = {
-    "success": _POSITIVE,
-    "info": _TEXT_SECONDARY,
-    "warning": _WARNING,
-    "error": _NEGATIVE,
-}
-
-
 def _inject_global_styles() -> None:
     """Inject the global stylesheet once at the top of ``main()``.
 
@@ -154,27 +145,24 @@ def _inject_global_styles() -> None:
             margin: 0 0 18px 0;
         }
 
-        /* ---- Freshness pill -------------------------------------------- */
-        .kuri-freshness-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            background: var(--kuri-surface);
-            border-radius: 999px;
-            padding: 8px 14px;
+        /* ---- Freshness line (plain text, no pill, no dot) -------------- */
+        .kuri-freshness {
+            font-size: 14px;
+            color: var(--kuri-text-secondary);
+            line-height: 1.5;
+            margin: -4px 0 0 0;
+        }
+        .kuri-freshness-note {
             font-size: 13px;
-            color: var(--kuri-text-primary);
-            margin: 0;
+            line-height: 1.5;
+            font-style: italic;
+            margin-top: 2px;
         }
-        .kuri-pill-dot {
-            display: inline-block;
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
+        .kuri-status-warning { color: var(--kuri-warning); }
+        .kuri-status-error   { color: var(--kuri-negative); }
+        .kuri-status-info    { color: var(--kuri-text-secondary); }
 
-/* ---- Section heading ------------------------------------------- */
+        /* ---- Section heading ------------------------------------------- */
         .kuri-section {
             font-size: 22px;
             font-weight: 600;
@@ -183,6 +171,23 @@ def _inject_global_styles() -> None:
             margin: 32px 0 16px 0;
         }
         .kuri-section.kuri-section-first { margin-top: 40px; }
+
+        /* ---- Current-value headline above the chart -------------------- */
+        .kuri-current-value {
+            font-size: 36px;
+            font-weight: 600;
+            color: var(--kuri-accent);
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.01em;
+            line-height: 1.1;
+            margin: -4px 0 4px 0;
+        }
+        .kuri-current-date {
+            font-size: 13px;
+            color: var(--kuri-text-secondary);
+            line-height: 1.4;
+            margin: 0 0 18px 0;
+        }
 
         /* ---- Today's picks --------------------------------------------- */
         .kuri-picks-lead {
@@ -428,23 +433,38 @@ def _section_heading(text: str, *, first: bool = False) -> None:
 
 
 def _render_header(data: dict[str, Any], *, freshness_label: str) -> None:
-    """Title block + freshness pill. The pill replaces the Streamlit alert
-    from earlier revisions: a small inline dot conveys status, the pill
-    text carries the freshness timestamp plus a plain-English status
-    sentence. ``freshness_label`` is pre-built in ``main()`` so the header
-    and footer cannot drift; the structural-invariant test in
+    """Title block + plain-text freshness line.
+
+    The earlier pill-with-dot was removed per Rishi's call on 2026-05-20:
+    the bubble and the status dot felt overdesigned for a single timestamp.
+    The replacement is a quiet ``As of <timestamp>`` line in secondary text.
+    For non-success status (data_stale / failed / partial / skipped_holiday)
+    a second italic line names the problem in the matching status color,
+    so a degraded run never reads as a clean success.
+
+    ``freshness_label`` is pre-built in ``main()`` so the header and footer
+    cannot drift; the structural-invariant test in
     ``tests/test_dashboard_app_helpers.py`` pins this contract.
     """
     st.markdown('<div class="kuri-title">kuri</div>', unsafe_allow_html=True)
     badge_text, badge_kind = freshness_badge(data["freshness"]["latest_run_status"])
-    dot_color = _BADGE_DOT_COLOR_BY_KIND.get(badge_kind, _TEXT_SECONDARY)
-    st.markdown(
-        '<div class="kuri-freshness-pill">'
-        f'<span class="kuri-pill-dot" style="background:{dot_color}"></span>'
-        f"<span>Data as of {freshness_label}. {badge_text}</span>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    if badge_kind == "success":
+        # Success is implied by a fresh timestamp; no status sentence needed.
+        st.markdown(
+            f'<div class="kuri-freshness">As of {freshness_label}.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        note_class = {
+            "warning": "kuri-status-warning",
+            "error": "kuri-status-error",
+            "info": "kuri-status-info",
+        }.get(badge_kind, "kuri-status-warning")
+        st.markdown(
+            f'<div class="kuri-freshness">As of {freshness_label}.</div>'
+            f'<div class="kuri-freshness-note {note_class}">{badge_text}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def _render_todays_picks(data: dict[str, Any]) -> None:
@@ -514,14 +534,44 @@ def _render_timing(data: dict[str, Any]) -> None:
 def _render_value_curve(data: dict[str, Any]) -> None:
     curve = data["value_curve"]
     _section_heading("Portfolio value over time", first=True)
+
+    # Current-value headline above the chart: the latest kuri portfolio
+    # value rendered as a big terracotta number, with the as-of date in
+    # secondary text underneath. Modern fintech dashboards anchor on this
+    # "what is it worth today" stat — without it the chart alone forces the
+    # reader to mentally extract the latest value from the right-edge tick.
+    if curve["kuri"]:
+        latest = curve["kuri"][-1]
+        st.markdown(
+            f'<div class="kuri-current-value">{format_inr_lakh(latest["value"])}</div>'
+            f'<div class="kuri-current-date">as of {short_date_label(latest["date"])}</div>',
+            unsafe_allow_html=True,
+        )
+
     fig = go.Figure()
-    fig.add_trace(_curve_trace(curve["kuri"], name="kuri", width=2.5, color=_ACCENT))
+    # kuri is added FIRST so its area fill renders BENEATH the benchmark
+    # lines (Plotly draws traces in add order). The fill is a very faint
+    # terracotta wash that gives the chart depth without dominating; line
+    # width is 3 for the primary, benchmarks are 0.9 to recede.
+    fig.add_trace(
+        go.Scatter(
+            x=[p["date"] for p in curve["kuri"]],
+            y=[p["value"] for p in curve["kuri"]],
+            customdata=[format_inr_lakh(p["value"]) for p in curve["kuri"]],
+            mode="lines",
+            name="kuri",
+            line={"width": 3, "color": _ACCENT},
+            fill="tozeroy",
+            fillcolor="rgba(194, 65, 12, 0.06)",
+            hovertemplate="<b>kuri</b>: %{customdata}<extra></extra>",
+        )
+    )
     if curve["equal_weight"]:
         fig.add_trace(
             _curve_trace(
                 curve["equal_weight"],
                 name="equal-weight basket",
-                width=1.0,
+                width=0.9,
                 color=_TEXT_TERTIARY,
                 dash="dot",
             )
@@ -531,7 +581,7 @@ def _render_value_curve(data: dict[str, Any]) -> None:
             _curve_trace(
                 curve["nifty50"],
                 name="Nifty 50 index",
-                width=1.0,
+                width=0.9,
                 color=_TEXT_SECONDARY,
                 dash="dash",
             )
@@ -584,28 +634,40 @@ def _render_value_curve(data: dict[str, Any]) -> None:
     tickvals = list(range(tick_start, tick_end + 1, step))
     ticktext = [f"₹{v // 100_000}L" for v in tickvals]
 
+    # X-axis: sparse year-only ticks. ``dtick="M12"`` is Plotly's "every 12
+    # months" for date axes; ``tickformat="%Y"`` strips month/day so the
+    # labels read 2022, 2023, 2024, 2025, 2026 without clutter. Y-axis
+    # range is explicitly clamped slightly tighter than the data span so
+    # the area fill (which technically extends to y=0) only shows the
+    # portion visible above the bottom edge.
     fig.update_xaxes(
         range=[xmin, xmax],
         showgrid=False,
         showline=False,
         ticks="outside",
-        tickfont={"size": 11, "color": _TEXT_SECONDARY, "family": "Inter, sans-serif"},
+        ticklen=6,
+        dtick="M12",
+        tickformat="%Y",
+        tickfont={"size": 13, "color": _TEXT_SECONDARY, "family": "Inter, sans-serif"},
         tickcolor=_BORDER,
     )
+    yrange_pad = max((ymax - ymin) * 0.04, 50_000)
     fig.update_yaxes(
+        range=[ymin - yrange_pad, ymax + yrange_pad],
         showgrid=True,
         gridcolor=_SURFACE,
         gridwidth=1,
         zeroline=False,
         showline=False,
         ticks="outside",
+        ticklen=6,
         tickvals=tickvals,
         ticktext=ticktext,
-        tickfont={"size": 11, "color": _TEXT_SECONDARY, "family": "Inter, sans-serif"},
+        tickfont={"size": 13, "color": _TEXT_SECONDARY, "family": "Inter, sans-serif"},
         tickcolor=_BORDER,
     )
     fig.update_layout(
-        height=420,
+        height=560,
         margin={"l": 8, "r": 8, "t": 36, "b": 8},
         paper_bgcolor=_BG,
         plot_bgcolor=_BG,
@@ -613,10 +675,10 @@ def _render_value_curve(data: dict[str, Any]) -> None:
         legend={
             "orientation": "h",
             "yanchor": "bottom",
-            "y": -0.22,
+            "y": -0.14,
             "xanchor": "left",
             "x": 0,
-            "font": {"size": 11, "color": _TEXT_SECONDARY, "family": "Inter, sans-serif"},
+            "font": {"size": 12, "color": _TEXT_SECONDARY, "family": "Inter, sans-serif"},
             "bgcolor": "rgba(0,0,0,0)",
             "borderwidth": 0,
         },
