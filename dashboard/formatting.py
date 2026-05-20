@@ -38,7 +38,7 @@ _BADGE_BY_STATUS: dict[str, tuple[str, str]] = {
     "partial": ("Last update didn't complete fully.", "warning"),
     "failed": ("Last update did not complete.", "error"),
     "data_stale": ("Market data was delayed today.", "warning"),
-    "skipped_holiday": ("Markets were closed — no update today.", "info"),
+    "skipped_holiday": ("Markets were closed. No update today.", "info"),
 }
 
 
@@ -96,10 +96,16 @@ def pct_change_label(*, entry_price: float, current_mark: float) -> str:
 
 def rebalance_message(*, is_rebalance_day: bool) -> str:
     """Plain-English Today's-Picks lead line. Answers the dad-facing question
-    "do I need to do anything today?" without using the word "rebalance"."""
+    "do I need to do anything today?" without using the word "rebalance".
+
+    Phrased to avoid em-dashes (a common AI-writing tell) — paired clauses
+    become two short sentences instead. Both copy variants contain the
+    literal phrase ``10 stocks`` so the renderer can highlight it as a
+    key number in the accent color.
+    """
     if is_rebalance_day:
-        return "Today the model picked a new set of 10 stocks."
-    return "No change today — the model is holding the same 10 stocks. Nothing to do today."
+        return "The model picked a new set of 10 stocks today."
+    return "The model isn't changing its picks today. It's holding the same 10 stocks."
 
 
 _ERA_LABELS: dict[str, str] = {

@@ -78,7 +78,7 @@ def test_freshness_badge_maps_each_run_status_to_plain_text_and_kind() -> None:
     assert freshness_badge("failed") == ("Last update did not complete.", "error")
     assert freshness_badge("data_stale") == ("Market data was delayed today.", "warning")
     assert freshness_badge("skipped_holiday") == (
-        "Markets were closed — no update today.",
+        "Markets were closed. No update today.",
         "info",
     )
 
@@ -91,13 +91,21 @@ def test_freshness_badge_falls_back_to_warning_for_unknown_status() -> None:
 
 
 def test_rebalance_message_distinguishes_rebalance_day_from_hold_day() -> None:
-    """The dad-facing copy must be unambiguous about "do I need to do something today?"."""
+    """The dad-facing copy must be unambiguous about "do I need to do something today?".
+
+    Phrased without em-dashes (a common AI-writing tell). Both variants
+    contain the literal phrase ``10 stocks`` so the renderer can highlight
+    it as a key number in the accent color via a simple string replace.
+    """
     assert rebalance_message(is_rebalance_day=True) == (
-        "Today the model picked a new set of 10 stocks."
+        "The model picked a new set of 10 stocks today."
     )
     assert rebalance_message(is_rebalance_day=False) == (
-        "No change today — the model is holding the same 10 stocks. Nothing to do today."
+        "The model isn't changing its picks today. It's holding the same 10 stocks."
     )
+    # No em-dashes in either variant — keeps both runtime copy and tests honest.
+    for variant in (True, False):
+        assert "—" not in rebalance_message(is_rebalance_day=variant)
 
 
 def test_era_label_translates_source_tag_to_plain_english_avoiding_backtest_word() -> None:
@@ -118,6 +126,28 @@ def test_pct_change_label_uses_arrows_and_one_decimal() -> None:
     assert pct_change_label(entry_price=100.0, current_mark=121.9) == "▲ 21.9%"
     assert pct_change_label(entry_price=100.0, current_mark=99.1) == "▼ 0.9%"
     assert pct_change_label(entry_price=100.0, current_mark=100.0) == "▲ 0.0%"
+
+
+def test_pct_change_label_pins_formula_against_real_basket_values() -> None:
+    """Regression: pin the formula ``(current_mark / entry_price - 1) * 100``
+    against three actual basket entries from the 2026-03-24 rebalance, so a
+    future "simplify" pass that swaps the operands or changes the formula
+    fails CI rather than silently mis-rendering the picks page.
+
+    The values are exactly what data.json carried after the 2026-05-19 cron
+    success — taken from the live production payload, not synthetic. This
+    is the "one specific (entry, current) pair pinned to a known correct
+    percentage" the Bug 1 dispatch asked for, broadened to three pairs
+    spanning the rendered magnitude range (~9%, ~16%, ~27%).
+    """
+    # HINDALCO entry 854.65 on 2026-03-24, current_mark 1085.50 → +27.0%
+    assert pct_change_label(entry_price=854.65, current_mark=1085.50) == "▲ 27.0%"
+    # GRASIM entry 2549.40, current 2971.10 → +16.5%
+    assert pct_change_label(entry_price=2549.40, current_mark=2971.10) == "▲ 16.5%"
+    # APOLLOHOSP entry 7413.00, current 8078.50 → +9.0%
+    assert pct_change_label(entry_price=7413.00, current_mark=8078.50) == "▲ 9.0%"
+    # ICICIBANK entry 1251.20, current 1237.30 → -1.1% (negative case from same basket)
+    assert pct_change_label(entry_price=1251.20, current_mark=1237.30) == "▼ 1.1%"
 
 
 # ---------------------------------------------------------------------------
