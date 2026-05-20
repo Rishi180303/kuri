@@ -174,18 +174,7 @@ def _inject_global_styles() -> None:
             flex-shrink: 0;
         }
 
-        /* ---- Honesty band (quiet inset) -------------------------------- */
-        .kuri-honesty {
-            background: var(--kuri-surface);
-            border-radius: 10px;
-            padding: 22px 24px;
-            font-size: 15px;
-            line-height: 1.55;
-            color: var(--kuri-text-primary);
-            margin: 28px 0 0 0;
-        }
-
-        /* ---- Section heading ------------------------------------------- */
+/* ---- Section heading ------------------------------------------- */
         .kuri-section {
             font-size: 22px;
             font-weight: 600;
@@ -453,17 +442,6 @@ def _render_header(data: dict[str, Any], *, freshness_label: str) -> None:
         '<div class="kuri-freshness-pill">'
         f'<span class="kuri-pill-dot" style="background:{dot_color}"></span>'
         f"<span>Data as of {freshness_label}. {badge_text}</span>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-
-def _render_honesty_band() -> None:
-    st.markdown(
-        '<div class="kuri-honesty">'
-        "kuri is a research tool. It has shown a small edge in past testing, "
-        "but it's not a guarantee and not advice. Use the picks as one input, "
-        "not a sure thing."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -770,9 +748,11 @@ def main() -> None:
     # the structural-invariant test for the contract.
     freshness_label = ist_freshness_label(data["freshness"]["latest_run_timestamp"])
 
-    # Full-width top: header + honesty band.
+    # Full-width top: header (freshness pill carries the "as of" line).
+    # The footer's "kuri is a research project. The picks are not financial
+    # advice." is the only on-page disclaimer; the longer honesty band was
+    # removed per Rishi's call on 2026-05-20.
     _render_header(data, freshness_label=freshness_label)
-    _render_honesty_band()
 
     # Two-column dashboard: left 60% picks + timing; right 40% chart + window.
     # CSS media query at 900px stacks them with picks first on mobile.
