@@ -485,7 +485,16 @@ def test_timing_block_projects_next_rebalance_date(
         store.close()
 
     nifty_csv, ew_csv = benchmark_csvs
-    data = build_dashboard_data(db_path=fresh_db, nifty50_csv=nifty_csv, ew_nifty49_csv=ew_csv)
+    # Equal-case for the projection-anchor invariant: generated_at.date()
+    # matches latest_state.date so both candidate anchors are identical and
+    # the projection result is unambiguous. The regression test below covers
+    # the stale-state case (generated_at.date() > latest_state.date).
+    data = build_dashboard_data(
+        db_path=fresh_db,
+        nifty50_csv=nifty_csv,
+        ew_nifty49_csv=ew_csv,
+        generated_at=datetime.datetime(2026, 5, 11, 18, 0, tzinfo=datetime.UTC),
+    )
     timing = data["timing"]
     assert timing == {
         "trading_days_since_rebalance": 5,
@@ -494,6 +503,106 @@ def test_timing_block_projects_next_rebalance_date(
         "next_rebalance_date": "2026-06-01",
         "next_rebalance_date_estimated": True,
     }
+
+
+def test_timing_projection_anchors_on_today_when_state_db_is_stale(
+    fresh_db: Path, benchmark_csvs: tuple[Path, Path]
+) -> None:
+    """Regression: when ``latest_state.date`` is stale relative to the
+    generation date (``generated_at.date()``), the projection's anchor must
+    be the LATER one, so ``next_rebalance_date`` stays forward-looking.
+
+    The 2026-05-19 bug: ``latest_state.date = 2026-04-01`` (last backtest
+    row, no live SUCCESS yet because of the DATA_STALE cascade), 4 trading
+    days had elapsed in the lifecycle's counter, projection naively
+    anchored on 2026-04-01 gave 2026-04-23 — a date in the past. The
+    freshness badge said "Data as of 12 May" while the timing block said
+    "Next change expected around 23 April." Two inconsistent "as of"s.
+
+    Fix: ``anchor = max(latest_state.date, today)``. With ``today =
+    2026-05-19``, the anchor is 2026-05-19, the projection is forward.
+
+    The counter ``trading_days_since_rebalance`` stays unanchored — it
+    measures lifecycle progress (daily_runs rows actually written) not
+    calendar time, so it remains 4 even though calendar weeks passed.
+    """
+    rebalance_date = datetime.date(2026, 3, 24)
+    backtest_hold_dates = [
+        datetime.date(2026, 3, 25),
+        datetime.date(2026, 3, 27),
+        datetime.date(2026, 3, 30),
+        datetime.date(2026, 4, 1),
+    ]
+    store = PaperTradingStore(fresh_db)
+    try:
+        picks = [DailyPick(rebalance_date, "RELIANCE", 1, 0.66)]
+        rebalance_positions = [
+            PositionRow(
+                date=rebalance_date,
+                ticker="RELIANCE",
+                qty=40.0,
+                entry_date=rebalance_date,
+                entry_price=2750.0,
+                current_mark=2750.0,
+                mtm_value=110000.0,
+            )
+        ]
+        _seed_run(
+            store,
+            target=rebalance_date,
+            source=RunSource.BACKTEST,
+            total_value=1_000_000.0,
+            picks=picks,
+            positions=rebalance_positions,
+        )
+        for d in backtest_hold_dates:
+            _seed_run(
+                store,
+                target=d,
+                source=RunSource.BACKTEST,
+                total_value=1_000_000.0,
+                positions=[
+                    PositionRow(
+                        date=d,
+                        ticker="RELIANCE",
+                        qty=40.0,
+                        entry_date=rebalance_date,
+                        entry_price=2750.0,
+                        current_mark=2750.0,
+                        mtm_value=110000.0,
+                    )
+                ],
+            )
+    finally:
+        store.close()
+
+    nifty_csv, ew_csv = benchmark_csvs
+    # State.db ends at 2026-04-01. Generation date is 2026-05-19 — ~48
+    # calendar days later. Without the anchor fix, the projection would
+    # land on 2026-04-23 (16 weekdays after 2026-04-01).
+    data = build_dashboard_data(
+        db_path=fresh_db,
+        nifty50_csv=nifty_csv,
+        ew_nifty49_csv=ew_csv,
+        generated_at=datetime.datetime(2026, 5, 19, 13, 57, tzinfo=datetime.UTC),
+    )
+    timing = data["timing"]
+    # Counter measures lifecycle progress: 4 backtest hold days between
+    # the rebalance (excluded) and latest_state.date (included).
+    assert timing["trading_days_since_rebalance"] == 4
+    assert timing["most_recent_rebalance_date"] == "2026-03-24"
+    # Projection forward from max(2026-04-01, 2026-05-19) = 2026-05-19,
+    # plus 16 weekdays. 2026-05-19 is a Tuesday; +16 weekdays lands in
+    # early June. The specific date depends on weekday math and any
+    # special-session skips, but the load-bearing assertion is that the
+    # result is strictly after the generation date.
+    next_date = datetime.date.fromisoformat(timing["next_rebalance_date"])
+    assert next_date > datetime.date(2026, 5, 19), (
+        f"next_rebalance_date {next_date} must be > generation date 2026-05-19; "
+        f"otherwise the page shows a past date for 'Next change expected'. "
+        f"This is the 2026-05-19 regression — anchor was latest_state.date "
+        f"instead of max(latest_state.date, today)."
+    )
 
 
 # ---------------------------------------------------------------------------

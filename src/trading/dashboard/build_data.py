@@ -62,7 +62,9 @@ def build_dashboard_data(
             "generator_git_sha": generator_git_sha,
             "freshness": _build_freshness(store.get_latest_run()),
             "todays_picks": _build_todays_picks(store, latest_state),
-            "timing": _build_timing(store, latest_state, special_sessions),
+            "timing": _build_timing(
+                store, latest_state, special_sessions, today=generated_at.date()
+            ),
             "value_curve": _build_value_curve(history, nifty50_csv, ew_nifty49_csv),
             "last_completed_window": None,
             "rank_movement": _build_rank_movement(store, latest_state),
@@ -152,7 +154,38 @@ def _build_timing(
     store: PaperTradingStore,
     latest_state: PortfolioStateRow | None,
     special_sessions: frozenset[datetime.date],
+    today: datetime.date,
 ) -> dict[str, Any] | None:
+    """Build the timing block: ``trading_days_since_rebalance`` (lifecycle
+    progress counter) and ``next_rebalance_date`` (weekday-projected estimate).
+
+    Anchor invariant for the projection:
+    ``anchor = max(latest_state.date, today)``. The projection must be
+    forward-looking relative to the page's "as of" moment, which is the
+    generation date (``today``). Anchoring purely on ``latest_state.date``
+    can produce a past date when state.db is stale relative to the
+    freshness badge — the badge says "Data as of <today>" but the timing
+    block silently uses an earlier anchor, and the two fields disagree.
+    This was the 2026-05-19 regression: ``latest_state.date`` was
+    ``2026-04-01`` (last backtest row, no live SUCCESS yet because of the
+    DATA_STALE cascade), ``today`` was ``2026-05-19``, counter was 4,
+    ``days_remaining = 16`` projected off 2026-04-01 gave 2026-04-23 — a
+    date in the past. ``max(...)`` also handles the paranoid opposite skew
+    (a state row slightly ahead of today at the IST/UTC boundary) by
+    picking the later one in either direction.
+
+    The counter (``trading_days_since_rebalance``) is intentionally NOT
+    re-anchored on ``today``: it measures lifecycle progress (daily_runs
+    rows actually written), not calendar time. If the cron is down for a
+    week, the counter should reflect that no progress was made — silently
+    advancing it would be wrong.
+
+    A future "simplify" pass that reverts ``max(latest_state.date, today)``
+    back to plain ``latest_state.date`` reintroduces the 2026-05-19
+    regression. The test
+    ``test_timing_projection_anchors_on_today_when_state_db_is_stale``
+    pins this.
+    """
     if latest_state is None:
         return None
     last_rebalance = _find_latest_rebalance_date(store, latest_state.date)
@@ -167,7 +200,10 @@ def _build_timing(
     runs_since = store.read_runs_in_range(start=last_rebalance, end=latest_state.date)
     count = sum(1 for r in runs_since if r.status != RunStatus.SKIPPED_HOLIDAY)
     days_remaining = max(1, REBALANCE_FREQ_DAYS - count)
-    projected = _project_weekdays_forward(latest_state.date, days_remaining, special_sessions)
+    # See module-level invariant in this function's docstring: anchor on
+    # whichever is later, so the projection stays forward-looking.
+    projection_anchor = max(latest_state.date, today)
+    projected = _project_weekdays_forward(projection_anchor, days_remaining, special_sessions)
     return {
         "trading_days_since_rebalance": count,
         "rebalance_freq_days": REBALANCE_FREQ_DAYS,
