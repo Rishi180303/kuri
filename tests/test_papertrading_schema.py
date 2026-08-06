@@ -1,5 +1,5 @@
 # tests/test_papertrading_schema.py
-"""Schema migration tests: idempotency, all 5 tables present, schema_version tracks correctly."""
+"""Schema migration tests: idempotency, all 6 tables present, schema_version tracks correctly."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ def test_migrate_creates_all_tables(tmp_path: Path) -> None:
         "daily_predictions",
         "portfolio_state",
         "positions",
+        "benchmark_state",
     }
 
 
@@ -194,21 +195,19 @@ def test_benchmark_state_rejects_unknown_series(tmp_path: Path) -> None:
         )
 
 
-def test_v2_database_migrates_to_v3_preserving_existing_rows(tmp_path: Path) -> None:
-    """Simulate a v2 database (the production state), migrate, verify rows survive."""
+def test_migrate_rerun_on_current_db_leaves_benchmark_state_untouched(tmp_path: Path) -> None:
+    """Re-running migrate() on a v3 database must not re-execute DDL destructively."""
     db = tmp_path / "state.db"
-    migrate(db)  # lands v3 directly on an empty db
+    migrate(db)
     with sqlite3.connect(db) as conn:
         conn.execute(
-            "INSERT INTO portfolio_state "
-            "(date, total_value, cash, n_positions, gross_value, regime_label, source) "
-            "VALUES ('2026-05-12', 2611623.0, 1000.0, 10, 2610623.0, 'unknown', 'live')"
+            "INSERT INTO benchmark_state (date, series, total_value) VALUES (?, ?, ?)",
+            ("2026-04-02", "nifty50", 1_450_000.0),
         )
-    migrate(db)  # idempotent no-op
+    migrate(db)
     with sqlite3.connect(db) as conn:
-        count = conn.execute("SELECT COUNT(*) FROM portfolio_state").fetchone()[0]
-    assert count == 1
-    assert get_schema_version(db) == 3
+        row = conn.execute("SELECT date, series, total_value FROM benchmark_state").fetchone()
+    assert row == ("2026-04-02", "nifty50", 1_450_000.0)
 
 
 def test_v2_schema_migrates_to_v3_preserving_existing_rows(tmp_path: Path) -> None:
