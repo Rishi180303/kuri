@@ -103,6 +103,22 @@ def compute_live_equal_weight(
             f"universe OHLCV has no trading day on anchor date {anchor_date}; "
             "cannot restart equal_weight sim from the CSV anchor"
         )
+
+    # Drop post-anchor trading days where at least one universe ticker has no
+    # row.  A buy-and-hold NAV marked on the next complete day is arithmetically
+    # exact, so skipping a day never distorts the curve; the alternative
+    # (forward-filling stale closes inside the shared Phase 4 engine) would
+    # modify code that Phase 4 reproducibility depends on.  The skipped day
+    # simply has no benchmark point; the full-recompute design self-heals if
+    # the missing data is later backfilled.
+    universe = universe_ohlcv["ticker"].unique()
+    n_universe = universe.len()
+    post_anchor = universe_ohlcv.filter(pl.col("date") > anchor_date)
+    counts = post_anchor.group_by("date").agg(pl.col("ticker").n_unique().alias("n"))
+    incomplete = set(counts.filter(pl.col("n") < n_universe)["date"].to_list())
+    if incomplete:
+        universe_ohlcv = universe_ohlcv.filter(~pl.col("date").is_in(sorted(incomplete)))
+
     history = simulate_equal_weight_benchmark(
         universe_ohlcv=universe_ohlcv,
         backtest_start=anchor_date,

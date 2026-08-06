@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -130,6 +131,50 @@ def test_read_benchmark_anchor_reads_last_csv_row(tmp_path: Path) -> None:
     anchor_date, anchor_value = read_benchmark_anchor(csv_path)
     assert anchor_date == date(2026, 4, 1)
     assert anchor_value == pytest.approx(1432200.8007450695)
+
+
+def test_compute_live_equal_weight_skips_incomplete_days() -> None:
+    """A date where one ticker has no row is dropped rather than crashing the sim."""
+    ohlcv = _synth_universe()
+    trading_days = sorted(set(ohlcv["date"].to_list()))
+    # Pick a gap day that is safely post-anchor
+    post_anchor_days = [d for d in trading_days if d > ANCHOR]
+    gap_day = post_anchor_days[5]
+    assert gap_day > ANCHOR
+    one_ticker_missing = ohlcv.filter(
+        ~((pl.col("date") == gap_day) & (pl.col("ticker") == "TEST_00"))
+    )
+    end: date = max(one_ticker_missing["date"].to_list())
+    points = compute_live_equal_weight(
+        one_ticker_missing, anchor_date=ANCHOR, anchor_value=1_000_000.0, end=end
+    )
+    dates = [p.date for p in points]
+    assert gap_day not in dates, "incomplete day must be skipped"
+    # All other post-anchor trading days still present
+    expected = [d for d in trading_days if d > ANCHOR and d != gap_day]
+    assert dates == expected
+
+
+def test_compute_live_equal_weight_skipped_day_nav_is_finite() -> None:
+    """The point immediately after a skipped incomplete day is finite and positive."""
+    ohlcv = _synth_universe()
+    trading_days = sorted(set(ohlcv["date"].to_list()))
+    post_anchor_days = [d for d in trading_days if d > ANCHOR]
+    gap_day = post_anchor_days[5]
+    one_ticker_missing = ohlcv.filter(
+        ~((pl.col("date") == gap_day) & (pl.col("ticker") == "TEST_00"))
+    )
+    end: date = max(one_ticker_missing["date"].to_list())
+    points = compute_live_equal_weight(
+        one_ticker_missing, anchor_date=ANCHOR, anchor_value=1_000_000.0, end=end
+    )
+    dates = [p.date for p in points]
+    # The day after gap_day should be present and have a sane NAV
+    day_after_gap = post_anchor_days[6]
+    assert day_after_gap in dates
+    pt = next(p for p in points if p.date == day_after_gap)
+    assert pt.total_value > 0
+    assert math.isfinite(pt.total_value)
 
 
 def test_update_live_benchmarks_writes_both_series_idempotently(tmp_path: Path) -> None:
