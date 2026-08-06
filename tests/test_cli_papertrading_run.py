@@ -22,9 +22,11 @@ from typing import Any
 from unittest.mock import patch
 
 import polars as pl
+import pytest
 from typer.testing import CliRunner
 
 from trading.cli import app
+from trading.papertrading.store import PaperTradingStore
 from trading.papertrading.types import (
     PortfolioStateRow,
     RegimeLabel,
@@ -37,6 +39,8 @@ from trading.papertrading.types import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
+runner = CliRunner()
 
 _TICKERS = [f"TICK{i:02d}" for i in range(49)]
 _INITIAL_CAPITAL = 1_000_000.0
@@ -455,3 +459,51 @@ def test_run_exit_code_on_failure(tmp_path: Path) -> None:
     error_text = result.stderr if result.stderr else result.output
     assert "papertrading run failed" in error_text
     assert "simulated lifecycle failure" in error_text
+
+
+# ---------------------------------------------------------------------------
+# 6. update-benchmarks command
+# ---------------------------------------------------------------------------
+
+
+def test_update_benchmarks_command_writes_series(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI wires loaders + update_live_benchmarks + store together."""
+    from tests.test_papertrading_benchmarks import _index_frame, _synth_universe
+
+    ohlcv = _synth_universe()
+    index_frame = _index_frame()
+    monkeypatch.setattr(
+        "trading.backtest.data.load_universe_ohlcv",
+        lambda start, end: ohlcv,
+    )
+    monkeypatch.setattr(
+        "trading.backtest.data.load_index_ohlcv",
+        lambda symbol, start=None, end=None: index_frame,
+    )
+    n50_csv = tmp_path / "nifty50.csv"
+    n50_csv.write_text("date,total_value\n2026-04-01,1432200.80\n")
+    ew_csv = tmp_path / "ew.csv"
+    ew_csv.write_text("date,total_value\n2026-04-01,1899186.13\n")
+    db_path = tmp_path / "state.db"
+
+    result = runner.invoke(
+        app,
+        [
+            "papertrading",
+            "update-benchmarks",
+            "--db-path",
+            str(db_path),
+            "--nifty50-csv",
+            str(n50_csv),
+            "--ew-nifty49-csv",
+            str(ew_csv),
+            "--target-date",
+            "2026-06-24",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with PaperTradingStore(db_path) as store:
+        assert len(store.read_benchmark_history("nifty50")) == 3
+        assert len(store.read_benchmark_history("equal_weight")) > 0

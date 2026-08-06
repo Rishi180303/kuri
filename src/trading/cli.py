@@ -1021,6 +1021,70 @@ def papertrading_run(
     store.close()
 
 
+@papertrading_app.command("update-benchmarks")
+def papertrading_update_benchmarks(
+    target_date: str = typer.Option(
+        "",
+        "--target-date",
+        help="End date for the live window (ISO YYYY-MM-DD). Default: today.",
+    ),
+    db_path: Path = typer.Option(  # noqa: B008
+        Path("data/papertrading/state.db"),
+        "--db-path",
+        help="Path to the SQLite state database.",
+    ),
+    nifty50_csv: Path = typer.Option(  # noqa: B008
+        DEFAULT_DASHBOARD_NIFTY50_CSV,
+        "--nifty50-csv",
+        help="Phase 4 Nifty 50 history CSV (anchor source).",
+    ),
+    ew_nifty49_csv: Path = typer.Option(  # noqa: B008
+        DEFAULT_DASHBOARD_EW_NIFTY49_CSV,
+        "--ew-nifty49-csv",
+        help="Phase 4 equal-weight history CSV (anchor source).",
+    ),
+) -> None:
+    """Recompute the live Nifty 50 + equal-weight benchmark NAV series.
+
+    Anchors on the last row of each Phase 4 CSV and recomputes the full
+    live window with Phase 4's exact benchmark code (see
+    trading.papertrading.benchmarks), replacing the benchmark_state rows.
+    Idempotent; safe to re-run any day."""
+    import datetime
+
+    from trading.backtest.data import load_index_ohlcv, load_universe_ohlcv
+    from trading.papertrading.benchmarks import update_live_benchmarks
+
+    if target_date:
+        try:
+            target = datetime.date.fromisoformat(target_date)
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"--target-date must be YYYY-MM-DD, got {target_date!r}"
+            ) from exc
+    else:
+        target = datetime.date.today()
+
+    # 2018 warmup mirrors `kuri backtest run`: the EW sim computes rolling
+    # 20-day ADV internally, so the frame must extend well before the anchor.
+    universe_ohlcv = load_universe_ohlcv(start=datetime.date(2018, 1, 1), end=target)
+    index_ohlcv = load_index_ohlcv("NSEI", end=target)
+
+    with PaperTradingStore(db_path) as store:
+        counts = update_live_benchmarks(
+            store,
+            nifty50_csv=nifty50_csv,
+            ew_nifty49_csv=ew_nifty49_csv,
+            universe_ohlcv=universe_ohlcv,
+            index_ohlcv=index_ohlcv,
+            end=target,
+        )
+    typer.echo(
+        f"{target} benchmarks updated "
+        f"nifty50={counts['nifty50']} equal_weight={counts['equal_weight']}"
+    )
+
+
 @dashboard_app.command("build")
 def dashboard_build(
     db_path: Path = typer.Option(  # noqa: B008
