@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from trading.config import get_calendar_config
+from trading.papertrading.benchmarks import SERIES_EQUAL_WEIGHT, SERIES_NIFTY50
 from trading.papertrading.store import PaperTradingStore
 from trading.papertrading.types import (
+    BenchmarkPoint,
     DailyPick,
     PortfolioStateRow,
     PositionRow,
@@ -65,7 +67,7 @@ def build_dashboard_data(
             "timing": _build_timing(
                 store, latest_state, special_sessions, today=generated_at.date()
             ),
-            "value_curve": _build_value_curve(history, nifty50_csv, ew_nifty49_csv),
+            "value_curve": _build_value_curve(history, nifty50_csv, ew_nifty49_csv, store),
             "last_completed_window": None,
             "rank_movement": _build_rank_movement(store, latest_state),
         }
@@ -86,6 +88,7 @@ def _build_value_curve(
     history: list[PortfolioStateRow],
     nifty50_csv: Path,
     ew_nifty49_csv: Path,
+    store: PaperTradingStore,
 ) -> dict[str, Any]:
     kuri = [
         {
@@ -97,12 +100,23 @@ def _build_value_curve(
     ]
     live_dates = [row.date for row in history if row.source == RunSource.LIVE]
     live_start = live_dates[0].isoformat() if live_dates else None
+    equal_weight = _stitch_benchmark(
+        _read_benchmark_csv(ew_nifty49_csv),
+        store.read_benchmark_history(SERIES_EQUAL_WEIGHT),
+    )
+    nifty50 = _stitch_benchmark(
+        _read_benchmark_csv(nifty50_csv),
+        store.read_benchmark_history(SERIES_NIFTY50),
+    )
+    has_live_benchmarks = any(p["source"] == "live" for p in equal_weight) and any(
+        p["source"] == "live" for p in nifty50
+    )
     return {
         "live_start_date": live_start,
-        "benchmarks_live_pending": True,
+        "benchmarks_live_pending": not has_live_benchmarks,
         "kuri": kuri,
-        "equal_weight": _read_benchmark_csv(ew_nifty49_csv),
-        "nifty50": _read_benchmark_csv(nifty50_csv),
+        "equal_weight": equal_weight,
+        "nifty50": nifty50,
     }
 
 
@@ -313,8 +327,8 @@ def _read_benchmark_csv(path: Path) -> list[dict[str, Any]]:
     """Read a (date, total_value) CSV into ``[{date, value, source='backtest'}]``.
 
     Phase 4 published these as the canonical Nifty 50 / equal-weight reference
-    curves; their last row is the backtest cutoff (~2026-04-01). Live-period
-    extension is deliberately deferred — see ``benchmarks_live_pending``.
+    curves covering the backtest era only. The live extension is read from the
+    ``benchmark_state`` table and stitched by :func:`_stitch_benchmark`.
     """
     out: list[dict[str, Any]] = []
     with path.open(newline="") as fh:
@@ -326,6 +340,26 @@ def _read_benchmark_csv(path: Path) -> list[dict[str, Any]]:
                     "source": "backtest",
                 }
             )
+    return out
+
+
+def _stitch_benchmark(
+    csv_points: list[dict[str, Any]],
+    live_points: list[BenchmarkPoint],
+) -> list[dict[str, Any]]:
+    """Append benchmark_state rows dated strictly after the CSV tail as live points.
+
+    The CSV is the frozen Phase 4 artifact (source='backtest'); benchmark_state
+    holds the live extension. The strict-inequality guard keeps an anchor-dated
+    state row (or any historical overlap) from duplicating the CSV's rows.
+    """
+    last_csv_date = csv_points[-1]["date"] if csv_points else ""
+    out = list(csv_points)
+    out.extend(
+        {"date": p.date.isoformat(), "value": p.total_value, "source": "live"}
+        for p in live_points
+        if p.date.isoformat() > last_csv_date
+    )
     return out
 
 

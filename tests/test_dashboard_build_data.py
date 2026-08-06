@@ -26,6 +26,7 @@ from trading.dashboard.build_data import (
 )
 from trading.papertrading.store import PaperTradingStore
 from trading.papertrading.types import (
+    BenchmarkPoint,
     DailyPick,
     DailyPrediction,
     PortfolioStateRow,
@@ -866,3 +867,84 @@ def test_default_benchmark_csv_paths_are_tracked_in_git_and_readable() -> None:
         assert (
             first_line == "date,total_value"
         ), f"{path} header is {first_line!r}; expected 'date,total_value'"
+
+
+# ---------------------------------------------------------------------------
+# Task 6: live-benchmark stitching
+# The fixture CSVs (benchmark_csvs) end on 2022-07-06.  State rows must be
+# strictly after that date for them to be appended as "live" rows.
+# ---------------------------------------------------------------------------
+
+
+def test_value_curve_stitches_live_benchmark_rows(
+    fresh_db: Path, benchmark_csvs: tuple[Path, Path]
+) -> None:
+    """benchmark_state rows dated after the CSV tail append with source='live'."""
+    n50_csv, ew_csv = benchmark_csvs
+    # CSV tail is 2022-07-06; live rows are 7/7 and 7/8 (strictly after).
+    with PaperTradingStore(fresh_db) as store:
+        store.replace_benchmark_series(
+            "nifty50",
+            [
+                BenchmarkPoint(date=datetime.date(2022, 7, 7), total_value=1_440_000.0),
+                BenchmarkPoint(date=datetime.date(2022, 7, 8), total_value=1_450_000.0),
+            ],
+        )
+        store.replace_benchmark_series(
+            "equal_weight",
+            [BenchmarkPoint(date=datetime.date(2022, 7, 7), total_value=1_910_000.0)],
+        )
+    data = build_dashboard_data(db_path=fresh_db, nifty50_csv=n50_csv, ew_nifty49_csv=ew_csv)
+    n50 = data["value_curve"]["nifty50"]
+    assert n50[-1] == {"date": "2022-07-08", "value": 1_450_000.0, "source": "live"}
+    assert n50[-2] == {"date": "2022-07-07", "value": 1_440_000.0, "source": "live"}
+    assert all(p["source"] == "backtest" for p in n50[:-2])
+    assert data["value_curve"]["benchmarks_live_pending"] is False
+
+
+def test_benchmarks_live_pending_true_when_no_live_rows(
+    fresh_db: Path, benchmark_csvs: tuple[Path, Path]
+) -> None:
+    """Empty benchmark_state (pre-feed databases) keeps the pending flag."""
+    n50_csv, ew_csv = benchmark_csvs
+    data = build_dashboard_data(db_path=fresh_db, nifty50_csv=n50_csv, ew_nifty49_csv=ew_csv)
+    assert data["value_curve"]["benchmarks_live_pending"] is True
+    assert all(p["source"] == "backtest" for p in data["value_curve"]["nifty50"])
+
+
+def test_benchmarks_live_pending_true_when_only_one_series_has_rows(
+    fresh_db: Path, benchmark_csvs: tuple[Path, Path]
+) -> None:
+    """Half-fed state (one series written, one missing) still reads as pending."""
+    n50_csv, ew_csv = benchmark_csvs
+    with PaperTradingStore(fresh_db) as store:
+        store.replace_benchmark_series(
+            "nifty50",
+            [BenchmarkPoint(date=datetime.date(2022, 7, 7), total_value=1.0)],
+        )
+    data = build_dashboard_data(db_path=fresh_db, nifty50_csv=n50_csv, ew_nifty49_csv=ew_csv)
+    assert data["value_curve"]["benchmarks_live_pending"] is True
+
+
+def test_stitch_ignores_benchmark_rows_at_or_before_csv_tail(
+    fresh_db: Path, benchmark_csvs: tuple[Path, Path]
+) -> None:
+    """A state row dated on/before the CSV's last row must not duplicate it."""
+    n50_csv, ew_csv = benchmark_csvs
+    # CSV tail is 2022-07-06; include a row ON that date (should be ignored)
+    # and one strictly after (should be stitched).
+    with PaperTradingStore(fresh_db) as store:
+        store.replace_benchmark_series(
+            "nifty50",
+            [
+                BenchmarkPoint(date=datetime.date(2022, 7, 6), total_value=999.0),
+                BenchmarkPoint(date=datetime.date(2022, 7, 7), total_value=1_440_000.0),
+            ],
+        )
+        store.replace_benchmark_series(
+            "equal_weight",
+            [BenchmarkPoint(date=datetime.date(2022, 7, 7), total_value=1.0)],
+        )
+    data = build_dashboard_data(db_path=fresh_db, nifty50_csv=n50_csv, ew_nifty49_csv=ew_csv)
+    n50_dates = [p["date"] for p in data["value_curve"]["nifty50"]]
+    assert n50_dates.count("2022-07-06") == 1  # the CSV row wins, not the 999.0 state row
