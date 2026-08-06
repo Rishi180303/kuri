@@ -202,3 +202,17 @@ Year-10 aggregate projection ≈ **40 MiB** — roughly 250× under R2's 10 GB f
 ### Headline operational status
 
 As of 2026-05-13, cron run #11 fired autonomously under schedule trigger (no manual `workflow_dispatch`), 1m 6s wall-clock, all 11 steps green. The daily lifecycle prints a single line per run summarizing status / picks / fold (e.g. `2026-05-13 success picks=0 fold=15`). Daily picks are persisted to `state.db` but not yet surfaced to humans — that's the Phase 7 dashboard's job. Task 15 is the remaining Phase 5 work: a roughly one-week soak window of clean scheduled cron fires before declaring Phase 5 closed.
+
+## Dashboard (Phase 7)
+
+The Streamlit page in `dashboard/` renders `dashboard/data.json`, which the daily cron regenerates and commits after each lifecycle run. The value curve shows three lines — the strategy, the equal-weight basket, and the Nifty 50 index — split at a "live tracking begins" marker into the backtest era and the live forward period.
+
+### Live benchmark feed (2026-08-06)
+
+The two benchmark lines originally ended at the Phase 4 backtest cutoff (2026-04-01) because no live-period benchmark data existed. The feed closes that gap with an anchor-and-extend design: each cron day, `kuri papertrading update-benchmarks` recomputes the full live window from the last row of the Phase 4 CSVs (the anchor) and atomically replaces the rows in a `benchmark_state` table (state.db schema v3). The Nifty 50 extension is the same adj-close normalization Phase 4 used; the equal-weight extension re-runs `simulate_equal_weight_benchmark` — Phase 4's exact engine, costs, and slippage — restarted at the anchor with `initial_capital` equal to the anchor NAV. No reimplementation, no methodology drift. The dashboard generator stitches CSV rows (source `backtest`) with `benchmark_state` rows (source `live`) and flips `benchmarks_live_pending` off once both series have live points.
+
+Two disclosed seams. First, the restarted equal-weight sim pays a one-time full-basket entry cost (~13 bps) at the anchor that Phase 4's continuous sim would not have paid that day. Second, the live sim runs on the current 50-ticker universe while the backtest-era CSV is the frozen 49-ticker Phase 4 artifact — the live strategy itself trades the current universe, so the live-era comparison is apples-to-apples.
+
+Daily full recompute from a fixed anchor makes the feed deterministic and self-healing: missed cron days and yfinance adjusted-price revisions correct themselves on the next run. Days where any universe ticker is missing a row are skipped rather than crashed on or forward-filled — a buy-and-hold NAV marked on the next complete day is arithmetically exact, and forward-filling inside the shared engine would compromise Phase 4 reproducibility. This rule was validated the day it was written: LTM has a one-day gap on 2026-05-01 (a real NSE session; a yfinance artifact of the LTIM→LTM rename) that crashed the first end-to-end run because the restarted sim's first rebalance landed exactly on it.
+
+`last_completed_window` populates once two consecutive live rebalances have full benchmark coverage, reporting the strategy's window return alongside the same-period Nifty 50 and equal-weight returns — all three or nothing, so a strategy-only number can never appear without benchmark context.
