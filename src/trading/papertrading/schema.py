@@ -19,7 +19,10 @@ are written in the same main transaction; FK is appropriate).
 Schema v2 (2026-05-19): widens the ``portfolio_state.regime_label`` CHECK
 to allow the new ``unknown`` enum value. The lifecycle now writes
 ``regime_label='unknown'`` when a derived regime input is null instead of
-raising and aborting the whole transaction (Phase 5 DATA_STALE cascade fix)."""
+raising and aborting the whole transaction (Phase 5 DATA_STALE cascade fix).
+
+Schema v3 (2026-08-05): adds the ``benchmark_state`` table for the Phase 7
+live benchmark feed (daily Nifty 50 and equal-weight NAV series)."""
 
 from __future__ import annotations
 
@@ -27,7 +30,7 @@ import datetime
 import sqlite3
 from pathlib import Path
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 _SCHEMA_V1 = [
     """
@@ -97,6 +100,20 @@ _SCHEMA_V1 = [
     "CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(ticker, date)",
 ]
 
+# Schema v3 (2026-08-05): benchmark_state table for the Phase 7 live
+# benchmark feed. Stores the daily Nifty 50 and equal-weight NAV series
+# for the live forward period (anchored to the last Phase 4 CSV row).
+# Recomputed in full and replaced on every cron run — see
+# trading.papertrading.benchmarks for the methodology.
+_SCHEMA_V3_BENCHMARK_STATE = """
+    CREATE TABLE IF NOT EXISTS benchmark_state (
+        date         TEXT NOT NULL,
+        series       TEXT NOT NULL CHECK (series IN ('nifty50', 'equal_weight')),
+        total_value  REAL NOT NULL,
+        PRIMARY KEY (date, series)
+    )
+"""
+
 
 def migrate(db_path: Path) -> None:
     """Bring `db_path` up to ``CURRENT_SCHEMA_VERSION``. Idempotent."""
@@ -111,6 +128,8 @@ def migrate(db_path: Path) -> None:
                 conn.execute(stmt)
         if current < 2:
             _apply_v2_migration(conn)
+        if current < 3:
+            conn.execute(_SCHEMA_V3_BENCHMARK_STATE)
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version, applied) VALUES (?, ?)",
             (

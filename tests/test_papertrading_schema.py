@@ -34,13 +34,13 @@ def test_migrate_is_idempotent(tmp_path: Path) -> None:
     v1 = get_schema_version(db)
     migrate(db)  # re-run; should be no-op
     v2 = get_schema_version(db)
-    assert v1 == v2 == 2
+    assert v1 == v2 == 3
 
 
 def test_schema_version_is_current(tmp_path: Path) -> None:
     db = tmp_path / "test.db"
     migrate(db)
-    assert get_schema_version(db) == 2
+    assert get_schema_version(db) == 3
 
 
 def test_portfolio_state_check_accepts_unknown_regime_label(tmp_path: Path) -> None:
@@ -111,9 +111,9 @@ def test_v2_migration_preserves_existing_v1_portfolio_state_rows(tmp_path: Path)
         conn.commit()
     assert get_schema_version(db) == 1
 
-    # Run migrate() — should apply v2.
+    # Run migrate() — should apply v2 and v3.
     migrate(db)
-    assert get_schema_version(db) == 2
+    assert get_schema_version(db) == 3
 
     # Both portfolio_state rows preserved with their original regime_label.
     with sqlite3.connect(db) as conn:
@@ -168,3 +168,107 @@ def test_positions_fk_to_portfolio_state_is_enforced(tmp_path: Path) -> None:
                 "entry_price, current_mark, mtm_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 ("2024-01-02", "RELIANCE", 100.0, "2024-01-02", 1000.0, 1000.0, 100000.0),
             )
+
+
+def test_v3_creates_benchmark_state_table(tmp_path: Path) -> None:
+    """A fresh migrate() lands schema v3 with the benchmark_state table."""
+    db = tmp_path / "state.db"
+    migrate(db)
+    assert get_schema_version(db) == 3
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO benchmark_state (date, series, total_value) VALUES (?, ?, ?)",
+            ("2026-04-02", "nifty50", 1_450_000.0),
+        )
+        row = conn.execute("SELECT date, series, total_value FROM benchmark_state").fetchone()
+    assert row == ("2026-04-02", "nifty50", 1_450_000.0)
+
+
+def test_benchmark_state_rejects_unknown_series(tmp_path: Path) -> None:
+    db = tmp_path / "state.db"
+    migrate(db)
+    with sqlite3.connect(db) as conn, pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO benchmark_state (date, series, total_value) VALUES (?, ?, ?)",
+            ("2026-04-02", "sensex", 1.0),
+        )
+
+
+def test_v2_database_migrates_to_v3_preserving_existing_rows(tmp_path: Path) -> None:
+    """Simulate a v2 database (the production state), migrate, verify rows survive."""
+    db = tmp_path / "state.db"
+    migrate(db)  # lands v3 directly on an empty db
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO portfolio_state "
+            "(date, total_value, cash, n_positions, gross_value, regime_label, source) "
+            "VALUES ('2026-05-12', 2611623.0, 1000.0, 10, 2610623.0, 'unknown', 'live')"
+        )
+    migrate(db)  # idempotent no-op
+    with sqlite3.connect(db) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM portfolio_state").fetchone()[0]
+    assert count == 1
+    assert get_schema_version(db) == 3
+
+
+def test_v2_schema_migrates_to_v3_preserving_existing_rows(tmp_path: Path) -> None:
+    """Apply a genuine v2 schema, populate it, then run migrate() — the v3
+    migration must add benchmark_state and preserve all existing rows."""
+    from trading.papertrading.schema import _SCHEMA_V1
+
+    db = tmp_path / "state.db"
+    # Manually create a v2 database (v1 tables + v2 portfolio_state widening).
+    with sqlite3.connect(db) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        for stmt in _SCHEMA_V1:
+            conn.execute(stmt)
+        # Apply the v2 rebuild inline so we have a true v2 database.
+        conn.execute(
+            """
+            CREATE TABLE portfolio_state_v2 (
+                date          TEXT PRIMARY KEY,
+                total_value   REAL NOT NULL,
+                cash          REAL NOT NULL,
+                n_positions   INTEGER NOT NULL,
+                gross_value   REAL NOT NULL,
+                regime_label  TEXT NOT NULL CHECK (regime_label IN
+                                  ('calm_bull', 'trending_bull', 'choppy',
+                                   'high_vol_bear', 'unknown')),
+                source        TEXT NOT NULL CHECK (source IN ('backtest', 'live'))
+            )
+            """
+        )
+        conn.execute("INSERT INTO portfolio_state_v2 SELECT * FROM portfolio_state")
+        conn.execute("DROP TABLE portfolio_state")
+        conn.execute("ALTER TABLE portfolio_state_v2 RENAME TO portfolio_state")
+        conn.execute(
+            "INSERT INTO schema_version (version, applied) VALUES (?, ?)",
+            (2, "2026-05-19T00:00:00+00:00"),
+        )
+        # Seed a portfolio_state row.
+        conn.execute(
+            "INSERT INTO portfolio_state "
+            "(date, total_value, cash, n_positions, gross_value, regime_label, source) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("2026-05-20", 2_600_000.0, 50_000.0, 10, 2_550_000.0, "unknown", "live"),
+        )
+        conn.commit()
+    assert get_schema_version(db) == 2
+
+    # Run migrate() — should apply v3.
+    migrate(db)
+    assert get_schema_version(db) == 3
+
+    # Existing portfolio_state row preserved.
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT date, regime_label, source FROM portfolio_state ORDER BY date"
+        ).fetchall()
+        assert rows == [("2026-05-20", "unknown", "live")]
+        # benchmark_state table now exists and accepts valid series.
+        conn.execute(
+            "INSERT INTO benchmark_state (date, series, total_value) VALUES (?, ?, ?)",
+            ("2026-05-20", "equal_weight", 2_550_000.0),
+        )
+        count = conn.execute("SELECT COUNT(*) FROM benchmark_state").fetchone()[0]
+        assert count == 1
