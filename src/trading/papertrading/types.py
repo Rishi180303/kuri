@@ -100,3 +100,11 @@ class PositionRow:
     entry_price: float
     current_mark: float
     mtm_value: float
+
+
+@dataclass(frozen=True)
+class BenchmarkPoint:
+    """One daily NAV point of a live benchmark series (nifty50 / equal_weight)."""
+
+    date: datetime.date
+    total_value: float

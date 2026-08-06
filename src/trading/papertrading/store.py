@@ -33,6 +33,7 @@ from typing import Any
 
 from trading.papertrading.schema import migrate
 from trading.papertrading.types import (
+    BenchmarkPoint,
     DailyPick,
     DailyPrediction,
     PortfolioStateRow,
@@ -146,6 +147,18 @@ class PaperTradingStore:
             "regime_label, source FROM portfolio_state ORDER BY date ASC"
         ).fetchall()
         return [_row_to_state(r) for r in rows]
+
+    def read_benchmark_history(self, series: str) -> list[BenchmarkPoint]:
+        """All benchmark_state rows for ``series``, ascending by date.
+
+        ``series`` is 'nifty50' or 'equal_weight' (enforced by the table CHECK)."""
+        rows = self._conn.execute(
+            "SELECT date, total_value FROM benchmark_state " "WHERE series = ? ORDER BY date ASC",
+            (series,),
+        ).fetchall()
+        return [
+            BenchmarkPoint(date=datetime.date.fromisoformat(r[0]), total_value=r[1]) for r in rows
+        ]
 
     def read_runs_in_range(
         self,
@@ -302,6 +315,30 @@ class PaperTradingStore:
             ),
         )
         self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Write surface 3: benchmark_state — independent of daily run writes
+    # ------------------------------------------------------------------
+
+    def replace_benchmark_series(self, series: str, points: list[BenchmarkPoint]) -> None:
+        """Atomically replace every row for ``series`` with ``points``.
+
+        Full-recompute semantics: the live benchmark window is deterministic
+        from its fixed anchor, so each cron day recomputes the whole window
+        and swaps it in. Delete+insert in one transaction keeps readers from
+        ever observing a half-written series."""
+        conn = self._conn
+        try:
+            conn.execute("BEGIN")
+            conn.execute("DELETE FROM benchmark_state WHERE series = ?", (series,))
+            conn.executemany(
+                "INSERT INTO benchmark_state (date, series, total_value) " "VALUES (?, ?, ?)",
+                [(p.date.isoformat(), series, p.total_value) for p in points],
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
 
 # ------------------------------------------------------------------

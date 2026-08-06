@@ -16,6 +16,7 @@ import pytest
 
 from trading.papertrading.store import PaperTradingStore
 from trading.papertrading.types import (
+    BenchmarkPoint,
     DailyPick,
     DailyPrediction,
     PortfolioStateRow,
@@ -553,3 +554,46 @@ def test_read_runs_in_range_returns_all_statuses(tmp_path: Path) -> None:
         )
     rows = store.read_runs_in_range(date(2024, 1, 1), date(2024, 1, 10))
     assert {r.status for r in rows} == set(statuses)
+
+
+# ---------------------------------------------------------------------------
+# 13. benchmark_state: replace_benchmark_series / read_benchmark_history
+# ---------------------------------------------------------------------------
+
+
+def test_replace_benchmark_series_roundtrip(tmp_path: Path) -> None:
+    store = PaperTradingStore(tmp_path / "state.db")
+    points = [
+        BenchmarkPoint(date=datetime.date(2026, 4, 2), total_value=1_440_000.0),
+        BenchmarkPoint(date=datetime.date(2026, 4, 3), total_value=1_452_500.5),
+    ]
+    store.replace_benchmark_series("nifty50", points)
+    assert store.read_benchmark_history("nifty50") == points
+    # The other series is untouched
+    assert store.read_benchmark_history("equal_weight") == []
+    store.close()
+
+
+def test_replace_benchmark_series_replaces_not_appends(tmp_path: Path) -> None:
+    store = PaperTradingStore(tmp_path / "state.db")
+    first = [BenchmarkPoint(date=datetime.date(2026, 4, 2), total_value=100.0)]
+    second = [
+        BenchmarkPoint(date=datetime.date(2026, 4, 2), total_value=101.0),
+        BenchmarkPoint(date=datetime.date(2026, 4, 3), total_value=102.0),
+    ]
+    store.replace_benchmark_series("equal_weight", first)
+    store.replace_benchmark_series("equal_weight", second)
+    assert store.read_benchmark_history("equal_weight") == second
+    store.close()
+
+
+def test_read_benchmark_history_orders_by_date(tmp_path: Path) -> None:
+    store = PaperTradingStore(tmp_path / "state.db")
+    out_of_order = [
+        BenchmarkPoint(date=datetime.date(2026, 4, 3), total_value=2.0),
+        BenchmarkPoint(date=datetime.date(2026, 4, 2), total_value=1.0),
+    ]
+    store.replace_benchmark_series("nifty50", out_of_order)
+    dates = [p.date for p in store.read_benchmark_history("nifty50")]
+    assert dates == sorted(dates)
+    store.close()
