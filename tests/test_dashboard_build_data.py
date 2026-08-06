@@ -24,6 +24,7 @@ from trading.dashboard.build_data import (
     build_dashboard_data,
     write_dashboard_json,
 )
+from trading.papertrading.benchmarks import SERIES_EQUAL_WEIGHT, SERIES_NIFTY50
 from trading.papertrading.store import PaperTradingStore
 from trading.papertrading.types import (
     BenchmarkPoint,
@@ -710,33 +711,35 @@ def test_rank_movement_ticker_with_no_previous_day_data(
 
 
 # ---------------------------------------------------------------------------
-# Test 9: last_completed_window is always null in Stage 1
+# Test 9: last_completed_window — none without two live rebalances, populated
+#         when a full pair + benchmark coverage exists, none when benchmark
+#         coverage is missing (all-or-nothing rule).
 # ---------------------------------------------------------------------------
 
 
-def test_last_completed_window_is_null_even_when_a_live_window_would_close(
-    fresh_db: Path, benchmark_csvs: tuple[Path, Path]
+def _seed_two_live_rebalances(
+    db_path: Path,
+    *,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    start_value: float,
+    end_value: float,
 ) -> None:
-    """Stage 1 ships ``null`` regardless of whether a live rebalance→close cycle
-    exists. Its populated shape depends on the banked Phase 7 live-benchmark
-    feed and is deliberately deferred.
-    """
-    first_live_rebalance = datetime.date(2026, 5, 4)
-    second_live_rebalance = datetime.date(2026, 6, 1)
-    store = PaperTradingStore(fresh_db)
+    """Seed two live rebalance runs with portfolio_state on both dates."""
+    store = PaperTradingStore(db_path)
     try:
         _seed_run(
             store,
-            target=first_live_rebalance,
+            target=start_date,
             source=RunSource.LIVE,
-            total_value=1_000_000.0,
-            picks=[DailyPick(first_live_rebalance, "RELIANCE", 1, 0.66)],
+            total_value=start_value,
+            picks=[DailyPick(start_date, "RELIANCE", 1, 0.66)],
             positions=[
                 PositionRow(
-                    date=first_live_rebalance,
+                    date=start_date,
                     ticker="RELIANCE",
                     qty=40.0,
-                    entry_date=first_live_rebalance,
+                    entry_date=start_date,
                     entry_price=2750.0,
                     current_mark=2750.0,
                     mtm_value=110000.0,
@@ -745,16 +748,16 @@ def test_last_completed_window_is_null_even_when_a_live_window_would_close(
         )
         _seed_run(
             store,
-            target=second_live_rebalance,
+            target=end_date,
             source=RunSource.LIVE,
-            total_value=1_030_000.0,
-            picks=[DailyPick(second_live_rebalance, "TCS", 1, 0.68)],
+            total_value=end_value,
+            picks=[DailyPick(end_date, "TCS", 1, 0.68)],
             positions=[
                 PositionRow(
-                    date=second_live_rebalance,
+                    date=end_date,
                     ticker="TCS",
                     qty=30.0,
-                    entry_date=second_live_rebalance,
+                    entry_date=end_date,
                     entry_price=3800.0,
                     current_mark=3800.0,
                     mtm_value=114000.0,
@@ -763,6 +766,101 @@ def test_last_completed_window_is_null_even_when_a_live_window_would_close(
         )
     finally:
         store.close()
+
+
+def test_last_completed_window_none_with_fewer_than_two_live_rebalances(
+    fresh_db: Path, benchmark_csvs: tuple[Path, Path]
+) -> None:
+    """A store with only one live rebalance run yields None — no window to close."""
+    store = PaperTradingStore(fresh_db)
+    try:
+        _seed_run(
+            store,
+            target=datetime.date(2026, 6, 2),
+            source=RunSource.LIVE,
+            total_value=2_500_000.0,
+            picks=[DailyPick(datetime.date(2026, 6, 2), "RELIANCE", 1, 0.66)],
+            positions=[
+                PositionRow(
+                    date=datetime.date(2026, 6, 2),
+                    ticker="RELIANCE",
+                    qty=40.0,
+                    entry_date=datetime.date(2026, 6, 2),
+                    entry_price=2750.0,
+                    current_mark=2750.0,
+                    mtm_value=110000.0,
+                )
+            ],
+        )
+    finally:
+        store.close()
+
+    nifty_csv, ew_csv = benchmark_csvs
+    data = build_dashboard_data(db_path=fresh_db, nifty50_csv=nifty_csv, ew_nifty49_csv=ew_csv)
+    assert data["last_completed_window"] is None
+
+
+def test_last_completed_window_populates_on_live_rebalance_pair(
+    fresh_db: Path, benchmark_csvs: tuple[Path, Path]
+) -> None:
+    """Two live rebalances with portfolio_state + benchmark coverage yield the window."""
+    start_date = datetime.date(2026, 6, 2)
+    end_date = datetime.date(2026, 6, 30)
+
+    _seed_two_live_rebalances(
+        fresh_db,
+        start_date=start_date,
+        end_date=end_date,
+        start_value=2_500_000.0,
+        end_value=2_600_000.0,
+    )
+
+    with PaperTradingStore(fresh_db) as store:
+        store.replace_benchmark_series(
+            SERIES_NIFTY50,
+            [
+                BenchmarkPoint(date=start_date, total_value=1_500_000.0),
+                BenchmarkPoint(date=end_date, total_value=1_530_000.0),
+            ],
+        )
+        store.replace_benchmark_series(
+            SERIES_EQUAL_WEIGHT,
+            [
+                BenchmarkPoint(date=start_date, total_value=2_000_000.0),
+                BenchmarkPoint(date=end_date, total_value=2_090_000.0),
+            ],
+        )
+
+    nifty_csv, ew_csv = benchmark_csvs
+    data = build_dashboard_data(db_path=fresh_db, nifty50_csv=nifty_csv, ew_nifty49_csv=ew_csv)
+    window = data["last_completed_window"]
+    assert window == {
+        "window_start_rebalance_date": "2026-06-02",
+        "window_end_rebalance_date": "2026-06-30",
+        "kuri_return_pct": 4.0,
+        "nifty50_return_pct": 2.0,
+        "equal_weight_return_pct": 4.5,
+    }
+
+
+def test_last_completed_window_none_when_benchmark_coverage_missing(
+    fresh_db: Path, benchmark_csvs: tuple[Path, Path]
+) -> None:
+    """Two live rebalances but no benchmark rows on those dates -> None (all-or-nothing).
+
+    This was the Stage 1 contract: last_completed_window ships None whenever
+    benchmark context is absent — a kuri-only return would be a cherry-pick.
+    The all-or-nothing rule is enforced in Task 7 by requiring benchmark values
+    on both window-boundary dates; if any are missing the section is suppressed.
+    """
+    _seed_two_live_rebalances(
+        fresh_db,
+        start_date=datetime.date(2026, 5, 4),
+        end_date=datetime.date(2026, 6, 1),
+        start_value=1_000_000.0,
+        end_value=1_030_000.0,
+    )
+    # No benchmark rows written — benchmark_state table stays empty.
 
     nifty_csv, ew_csv = benchmark_csvs
     data = build_dashboard_data(db_path=fresh_db, nifty50_csv=nifty_csv, ew_nifty49_csv=ew_csv)

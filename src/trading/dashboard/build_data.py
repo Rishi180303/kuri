@@ -68,7 +68,7 @@ def build_dashboard_data(
                 store, latest_state, special_sessions, today=generated_at.date()
             ),
             "value_curve": _build_value_curve(history, nifty50_csv, ew_nifty49_csv, store),
-            "last_completed_window": None,
+            "last_completed_window": _build_last_completed_window(store, latest_state),
             "rank_movement": _build_rank_movement(store, latest_state),
         }
 
@@ -241,6 +241,53 @@ def _find_latest_rebalance_date(
         if run.n_picks_generated and run.n_picks_generated > 0:
             return run.run_date
     return None
+
+
+def _build_last_completed_window(
+    store: PaperTradingStore,
+    latest_state: PortfolioStateRow | None,
+) -> dict[str, Any] | None:
+    """Return the most recent completed live-to-live rebalance window, or None.
+
+    A window is (previous live rebalance, latest live rebalance). It reports
+    kuri's return alongside same-period Nifty 50 and equal-weight returns —
+    all three or nothing, so a kuri-only number can never appear without
+    benchmark context (the cherry-pick the three-line curve prevents)."""
+    if latest_state is None:
+        return None
+    runs = store.read_runs_in_range(start=datetime.date.min, end=latest_state.date)
+    live_rebalances = [
+        r.run_date
+        for r in runs
+        if r.source == RunSource.LIVE and r.n_picks_generated and r.n_picks_generated > 0
+    ]
+    if len(live_rebalances) < 2:
+        return None
+    start_d, end_d = live_rebalances[-2], live_rebalances[-1]
+    kuri_values = {row.date: row.total_value for row in store.read_portfolio_history()}
+    n50_values = {p.date: p.total_value for p in store.read_benchmark_history(SERIES_NIFTY50)}
+    ew_values = {p.date: p.total_value for p in store.read_benchmark_history(SERIES_EQUAL_WEIGHT)}
+    needed = [
+        kuri_values.get(start_d),
+        kuri_values.get(end_d),
+        n50_values.get(start_d),
+        n50_values.get(end_d),
+        ew_values.get(start_d),
+        ew_values.get(end_d),
+    ]
+    if any(v is None for v in needed):
+        return None
+
+    def _pct(a: float, b: float) -> float:
+        return round((b / a - 1.0) * 100.0, 2)
+
+    return {
+        "window_start_rebalance_date": start_d.isoformat(),
+        "window_end_rebalance_date": end_d.isoformat(),
+        "kuri_return_pct": _pct(kuri_values[start_d], kuri_values[end_d]),
+        "nifty50_return_pct": _pct(n50_values[start_d], n50_values[end_d]),
+        "equal_weight_return_pct": _pct(ew_values[start_d], ew_values[end_d]),
+    }
 
 
 def _project_weekdays_forward(
