@@ -94,6 +94,21 @@ def pct_change_label(*, entry_price: float, current_mark: float) -> str:
     return f"{arrow} {abs(pct):.1f}%"
 
 
+def window_return_label(pct: float) -> str:
+    """Render an already-computed return percentage with a direction arrow.
+
+    Accepts a plain float already in percent units (e.g. ``4.0`` for +4%).
+    Positive or zero → ``▲ N.N%``. Negative → ``▼ N.N%``. The arrow carries
+    direction so the audience never reads a bare signed number.
+
+    Used by ``_render_last_completed_window`` where the JSON payload already
+    provides the pct directly (unlike ``pct_change_label`` which derives it
+    from two prices).
+    """
+    arrow = "▼" if pct < 0 else "▲"
+    return f"{arrow} {abs(pct):.1f}%"
+
+
 def rebalance_message(*, is_rebalance_day: bool) -> str:
     """Plain-English Today's-Picks lead line. Answers the dad-facing question
     "do I need to do anything today?" without using the word "rebalance".

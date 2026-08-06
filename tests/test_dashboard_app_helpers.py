@@ -18,6 +18,7 @@ from dashboard.formatting import (
     rank_delta_label,
     rebalance_message,
     short_date_label,
+    window_return_label,
 )
 
 
@@ -148,6 +149,21 @@ def test_pct_change_label_pins_formula_against_real_basket_values() -> None:
     assert pct_change_label(entry_price=7413.00, current_mark=8078.50) == "▲ 9.0%"
     # ICICIBANK entry 1251.20, current 1237.30 → -1.1% (negative case from same basket)
     assert pct_change_label(entry_price=1251.20, current_mark=1237.30) == "▼ 1.1%"
+
+
+def test_window_return_label_uses_arrows_and_one_decimal_from_plain_pct() -> None:
+    """Positive or zero → ▲ N.N%. Negative → ▼ N.N%. Accepts already-computed pct."""
+    assert window_return_label(4.0) == "▲ 4.0%"
+    assert window_return_label(2.0) == "▲ 2.0%"
+    assert window_return_label(4.5) == "▲ 4.5%"
+    assert window_return_label(-1.25) == "▼ 1.2%"
+    assert window_return_label(0.0) == "▲ 0.0%"
+
+
+def test_window_return_label_negative_rounds_to_one_decimal() -> None:
+    """Negative values strip the sign; the arrow carries direction."""
+    assert window_return_label(-3.456) == "▼ 3.5%"
+    assert window_return_label(-0.049) == "▼ 0.0%"
 
 
 # ---------------------------------------------------------------------------

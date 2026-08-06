@@ -33,6 +33,7 @@ from dashboard.formatting import (  # noqa: E402
     rank_delta_label,
     rebalance_message,
     short_date_label,
+    window_return_label,
 )
 
 _DATA_PATH = _THIS_DIR / "data.json"
@@ -751,14 +752,33 @@ def _render_last_completed_window(data: dict[str, Any]) -> None:
         return
     start = window.get("window_start_rebalance_date")
     end = window.get("window_end_rebalance_date")
-    if start and end:
-        st.markdown(
-            '<div class="kuri-window-placeholder">'
-            f"Window from <strong>{short_date_label(start)}</strong> to "
-            f"<strong>{short_date_label(end)}</strong>."
-            "</div>",
-            unsafe_allow_html=True,
+    if not (start and end):
+        return
+    st.markdown(
+        '<div class="kuri-window-placeholder">'
+        f"From <strong>{short_date_label(start)}</strong> to "
+        f"<strong>{short_date_label(end)}</strong>:"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    rows_html: list[str] = []
+    for label, key in (
+        ("kuri", "kuri_return_pct"),
+        ("equal-weight basket", "equal_weight_return_pct"),
+        ("Nifty 50 index", "nifty50_return_pct"),
+    ):
+        pct = window[key]
+        css = "kuri-positive" if pct >= 0 else "kuri-negative"
+        rows_html.append(
+            '<div class="kuri-rank-row">'
+            f'<span class="kuri-rank-ticker">{label}</span>'
+            f'<span class="kuri-rank-delta {css}">{window_return_label(pct)}</span>'
+            "</div>"
         )
+    st.markdown(
+        f'<div class="kuri-rank-list">{"".join(rows_html)}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _render_rank_movement(data: dict[str, Any]) -> None:
