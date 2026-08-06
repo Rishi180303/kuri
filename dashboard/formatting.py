@@ -94,19 +94,31 @@ def pct_change_label(*, entry_price: float, current_mark: float) -> str:
     return f"{arrow} {abs(pct):.1f}%"
 
 
-def window_return_label(pct: float) -> str:
-    """Render an already-computed return percentage with a direction arrow.
+def window_return_label(pct: float) -> tuple[str, str]:
+    """Render an already-computed return percentage as ``(text, css_class)``.
 
     Accepts a plain float already in percent units (e.g. ``4.0`` for +4%).
-    Positive or zero → ``▲ N.N%``. Negative → ``▼ N.N%``. The arrow carries
-    direction so the audience never reads a bare signed number.
+    Both the display text and the CSS color class are decided here so they
+    cannot drift apart (previously the arrow choice and the CSS class were two
+    independent boolean tests in the caller).
 
-    Used by ``_render_last_completed_window`` where the JSON payload already
-    provides the pct directly (unlike ``pct_change_label`` which derives it
-    from two prices).
+    The flat band (``abs(pct) < 0.05``) collapses near-zero values to a neutral
+    label. A 20-day return rounded to 1 decimal place makes true-zero displays
+    plausible, and a value like 0.03% would show as "▲ 0.0%" green on one day
+    and "▼ 0.0%" red on another — a color flip that looks like a bug to a
+    non-technical viewer. Mapping the entire band to ``("flat", "kuri-rank-flat")``
+    matches the neutral precedent of ``rank_delta_label``'s "no change" styling.
+
+    Returns:
+        ``("flat", "kuri-rank-flat")`` when ``abs(pct) < 0.05``.
+        ``(f"▲ {pct:.1f}%", "kuri-positive")`` when ``pct >= 0.05``.
+        ``(f"▼ {abs(pct):.1f}%", "kuri-negative")`` when ``pct <= -0.05``.
     """
-    arrow = "▼" if pct < 0 else "▲"
-    return f"{arrow} {abs(pct):.1f}%"
+    if abs(pct) < 0.05:
+        return ("flat", "kuri-rank-flat")
+    if pct >= 0.05:
+        return (f"▲ {pct:.1f}%", "kuri-positive")
+    return (f"▼ {abs(pct):.1f}%", "kuri-negative")
 
 
 def rebalance_message(*, is_rebalance_day: bool) -> str:

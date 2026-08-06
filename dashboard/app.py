@@ -767,12 +767,11 @@ def _render_last_completed_window(data: dict[str, Any]) -> None:
         ("equal-weight basket", "equal_weight_return_pct"),
         ("Nifty 50 index", "nifty50_return_pct"),
     ):
-        pct = window[key]
-        css = "kuri-positive" if pct >= 0 else "kuri-negative"
+        text, css = window_return_label(window[key])
         rows_html.append(
             '<div class="kuri-rank-row">'
             f'<span class="kuri-rank-ticker">{label}</span>'
-            f'<span class="kuri-rank-delta {css}">{window_return_label(pct)}</span>'
+            f'<span class="kuri-rank-delta {css}">{text}</span>'
             "</div>"
         )
     st.markdown(

@@ -151,19 +151,30 @@ def test_pct_change_label_pins_formula_against_real_basket_values() -> None:
     assert pct_change_label(entry_price=1251.20, current_mark=1237.30) == "▼ 1.1%"
 
 
-def test_window_return_label_uses_arrows_and_one_decimal_from_plain_pct() -> None:
-    """Positive or zero → ▲ N.N%. Negative → ▼ N.N%. Accepts already-computed pct."""
-    assert window_return_label(4.0) == "▲ 4.0%"
-    assert window_return_label(2.0) == "▲ 2.0%"
-    assert window_return_label(4.5) == "▲ 4.5%"
-    assert window_return_label(-1.25) == "▼ 1.2%"
-    assert window_return_label(0.0) == "▲ 0.0%"
+def test_window_return_label_returns_tuple_of_text_and_css_class() -> None:
+    """Positive: (▲ N.N%, kuri-positive). Negative: (▼ N.N%, kuri-negative).
+    Both display decisions live in one place so the arrow and CSS class cannot
+    drift apart."""
+    assert window_return_label(4.0) == ("▲ 4.0%", "kuri-positive")
+    assert window_return_label(2.0) == ("▲ 2.0%", "kuri-positive")
+    assert window_return_label(4.5) == ("▲ 4.5%", "kuri-positive")
+    assert window_return_label(-1.25) == ("▼ 1.2%", "kuri-negative")
+    assert window_return_label(-3.456) == ("▼ 3.5%", "kuri-negative")
 
 
-def test_window_return_label_negative_rounds_to_one_decimal() -> None:
-    """Negative values strip the sign; the arrow carries direction."""
-    assert window_return_label(-3.456) == "▼ 3.5%"
-    assert window_return_label(-0.049) == "▼ 0.0%"
+def test_window_return_label_flat_band_collapses_near_zero_to_neutral() -> None:
+    """Values where abs(pct) < 0.05 round to 0.0% at 1dp; showing ▲ 0.0% green
+    vs ▼ 0.0% red looks like a bug to a non-technical viewer. The flat band maps
+    both signs to the same neutral label so no color flip appears."""
+    assert window_return_label(0.03) == ("flat", "kuri-rank-flat")
+    assert window_return_label(-0.03) == ("flat", "kuri-rank-flat")
+    assert window_return_label(0.0) == ("flat", "kuri-rank-flat")
+    assert window_return_label(0.049) == ("flat", "kuri-rank-flat")
+    assert window_return_label(-0.049) == ("flat", "kuri-rank-flat")
+    # Boundary: exactly 0.05 is positive (not flat).
+    assert window_return_label(0.05) == ("▲ 0.1%", "kuri-positive")
+    # Boundary: exactly -0.05 is negative (not flat).
+    assert window_return_label(-0.05) == ("▼ 0.1%", "kuri-negative")
 
 
 # ---------------------------------------------------------------------------
