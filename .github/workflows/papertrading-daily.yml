@@ -103,6 +103,10 @@ jobs:
       - name: Run papertrading lifecycle
         run: uv run kuri papertrading run
 
+      - name: Update live benchmark NAVs
+        continue-on-error: true  # benchmark feed serves the dashboard; a failure self-heals on the next full recompute and must never fail the cron
+        run: uv run kuri papertrading update-benchmarks
+
       - name: Sync runtime data back to R2
         if: always()  # Upload partial state even if lifecycle had a non-fatal issue.
         run: |
