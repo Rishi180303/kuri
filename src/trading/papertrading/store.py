@@ -151,14 +151,14 @@ class PaperTradingStore:
     def read_benchmark_history(self, series: str) -> list[BenchmarkPoint]:
         """All benchmark_state rows for ``series``, ascending by date.
 
-        ``series`` is 'nifty50' or 'equal_weight' (enforced by the table CHECK)."""
+        Unknown series names return an empty list on reads; writes are rejected
+        by the table CHECK.  Valid values are 'nifty50' and 'equal_weight'.
+        """
         rows = self._conn.execute(
-            "SELECT date, total_value FROM benchmark_state " "WHERE series = ? ORDER BY date ASC",
+            "SELECT date, total_value FROM benchmark_state WHERE series = ? ORDER BY date ASC",
             (series,),
         ).fetchall()
-        return [
-            BenchmarkPoint(date=datetime.date.fromisoformat(r[0]), total_value=r[1]) for r in rows
-        ]
+        return [_row_to_benchmark_point(r) for r in rows]
 
     def read_runs_in_range(
         self,
@@ -332,7 +332,7 @@ class PaperTradingStore:
             conn.execute("BEGIN")
             conn.execute("DELETE FROM benchmark_state WHERE series = ?", (series,))
             conn.executemany(
-                "INSERT INTO benchmark_state (date, series, total_value) " "VALUES (?, ?, ?)",
+                "INSERT INTO benchmark_state (date, series, total_value) VALUES (?, ?, ?)",
                 [(p.date.isoformat(), series, p.total_value) for p in points],
             )
             conn.execute("COMMIT")
@@ -398,6 +398,13 @@ def _row_to_position(row: tuple[Any, ...]) -> PositionRow:
         entry_price=float(row[4]),
         current_mark=float(row[5]),
         mtm_value=float(row[6]),
+    )
+
+
+def _row_to_benchmark_point(row: tuple[Any, ...]) -> BenchmarkPoint:
+    return BenchmarkPoint(
+        date=datetime.date.fromisoformat(str(row[0])),
+        total_value=float(row[1]),
     )
 
 

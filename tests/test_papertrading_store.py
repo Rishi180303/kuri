@@ -597,3 +597,27 @@ def test_read_benchmark_history_orders_by_date(tmp_path: Path) -> None:
     dates = [p.date for p in store.read_benchmark_history("nifty50")]
     assert dates == sorted(dates)
     store.close()
+
+
+def test_replace_benchmark_series_with_empty_clears_series(tmp_path: Path) -> None:
+    store = PaperTradingStore(tmp_path / "state.db")
+    store.replace_benchmark_series(
+        "nifty50",
+        [BenchmarkPoint(date=datetime.date(2026, 4, 2), total_value=100.0)],
+    )
+    store.replace_benchmark_series("nifty50", [])
+    assert store.read_benchmark_history("nifty50") == []
+    store.close()
+
+
+def test_replace_benchmark_series_leaves_other_series_untouched(tmp_path: Path) -> None:
+    """If the DELETE ever lost its WHERE series clause, this test catches it."""
+    store = PaperTradingStore(tmp_path / "state.db")
+    ew = [BenchmarkPoint(date=datetime.date(2026, 4, 2), total_value=200.0)]
+    store.replace_benchmark_series("equal_weight", ew)
+    store.replace_benchmark_series(
+        "nifty50",
+        [BenchmarkPoint(date=datetime.date(2026, 4, 2), total_value=100.0)],
+    )
+    assert store.read_benchmark_history("equal_weight") == ew
+    store.close()

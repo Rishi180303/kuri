@@ -104,7 +104,12 @@ class PositionRow:
 
 @dataclass(frozen=True)
 class BenchmarkPoint:
-    """One daily NAV point of a live benchmark series (nifty50 / equal_weight)."""
+    """One daily NAV point of a live benchmark series (nifty50 / equal_weight).
+
+    ``total_value`` is a benchmark NAV in the same units as
+    ``PortfolioStateRow.total_value``, anchored to the last Phase 4 CSV row
+    (not a real currency position).
+    """
 
     date: datetime.date
     total_value: float
