@@ -90,9 +90,19 @@ def compute_live_equal_weight(
 ) -> list[BenchmarkPoint]:
     """Equal-weight NAV extension via Phase 4's exact sim, restarted at the anchor.
 
+    Requires the anchor date itself to be present in ``universe_ohlcv`` so the
+    sim can open positions on that day; raises ``ValueError`` otherwise (loud
+    failure — a missing anchor row means the universe frame is mis-ranged or
+    the anchor date is not a trading day in the supplied data).
+
     Returns points strictly after the anchor date (the anchor-date row of the
     restarted sim reflects the one-time entry cost and is dropped so the CSV's
     anchor row remains the authoritative anchor value)."""
+    if anchor_date not in set(universe_ohlcv["date"].to_list()):
+        raise ValueError(
+            f"universe OHLCV has no trading day on anchor date {anchor_date}; "
+            "cannot restart equal_weight sim from the CSV anchor"
+        )
     history = simulate_equal_weight_benchmark(
         universe_ohlcv=universe_ohlcv,
         backtest_start=anchor_date,
@@ -131,4 +141,4 @@ def update_live_benchmarks(
     )
     store.replace_benchmark_series(SERIES_NIFTY50, nifty_points)
     store.replace_benchmark_series(SERIES_EQUAL_WEIGHT, ew_points)
-    return {"nifty50": len(nifty_points), "equal_weight": len(ew_points)}
+    return {SERIES_NIFTY50: len(nifty_points), SERIES_EQUAL_WEIGHT: len(ew_points)}
