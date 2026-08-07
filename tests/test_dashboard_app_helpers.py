@@ -9,7 +9,12 @@ label. Streamlit rendering itself is intentionally not tested.
 
 from __future__ import annotations
 
+import datetime
+
+import pytest
 from dashboard.formatting import (
+    chart_window_start,
+    chart_window_tick_config,
     era_label,
     format_inr_lakh,
     freshness_badge,
@@ -175,6 +180,48 @@ def test_window_return_label_flat_band_collapses_near_zero_to_neutral() -> None:
     assert window_return_label(0.05) == ("▲ 0.1%", "kuri-positive")
     # Boundary: exactly -0.05 is negative (not flat).
     assert window_return_label(-0.05) == ("▼ 0.1%", "kuri-negative")
+
+
+def test_chart_window_start_subtracts_fixed_day_counts_from_the_end_date() -> None:
+    """3M/6M/1Y map to 91/182/365 days back from the last data point (not
+    wall-clock today). Day-based arithmetic is deliberate: it needs no
+    dateutil dependency and a chart window is a viewing convenience, not a
+    financial calculation."""
+    end = datetime.date(2026, 8, 6)
+    assert chart_window_start("3M", end) == datetime.date(2026, 5, 7)
+    assert chart_window_start("6M", end) == datetime.date(2026, 2, 5)
+    assert chart_window_start("1Y", end) == datetime.date(2025, 8, 6)
+
+
+def test_chart_window_start_returns_none_for_all_and_crosses_year_boundaries() -> None:
+    """'All' means no lower bound (None). Subtraction must cross year
+    boundaries correctly — a January end date lands the 3M window in the
+    previous October."""
+    assert chart_window_start("All", datetime.date(2026, 8, 6)) is None
+    assert chart_window_start("3M", datetime.date(2026, 1, 15)) == datetime.date(2025, 10, 16)
+
+
+def test_chart_window_start_raises_on_unknown_window_label() -> None:
+    """A typo'd window label must fail loudly at the call site, not silently
+    render the full history as if 'All' had been chosen."""
+    with pytest.raises(ValueError, match="unknown chart window"):
+        chart_window_start("2W", datetime.date(2026, 8, 6))
+
+
+def test_chart_window_tick_config_scales_tick_density_to_the_window() -> None:
+    """Year-only ticks collapse to a single label on short windows, so tick
+    spacing and format must adapt: monthly '%b' for 3M/6M, quarterly '%b' for
+    1Y, and the original yearly '%Y' for All. Returns Plotly's (dtick,
+    tickformat) pair."""
+    assert chart_window_tick_config("3M") == ("M1", "%b")
+    assert chart_window_tick_config("6M") == ("M1", "%b")
+    assert chart_window_tick_config("1Y") == ("M3", "%b")
+    assert chart_window_tick_config("All") == ("M12", "%Y")
+
+
+def test_chart_window_tick_config_raises_on_unknown_window_label() -> None:
+    with pytest.raises(ValueError, match="unknown chart window"):
+        chart_window_tick_config("2W")
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ the only runtime dependencies; the ``trading`` package is NOT imported.
 
 from __future__ import annotations
 
+import datetime
 import json
 import sys
 from pathlib import Path
@@ -26,6 +27,8 @@ import plotly.graph_objects as go  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from dashboard.formatting import (  # noqa: E402
+    chart_window_start,
+    chart_window_tick_config,
     format_inr_lakh,
     freshness_badge,
     ist_freshness_label,
@@ -295,6 +298,38 @@ def _inject_global_styles() -> None:
             margin: 12px 0 0 0;
         }
 
+        /* ---- Chart window pills ---------------------------------------- */
+        /* ``st.pills`` buttons carry stable test-ids in 1.40:
+           ``stBaseButton-pills`` (inactive) / ``stBaseButton-pillsActive``.
+           Quiet inactive pills on the paper background; the active window
+           fills terracotta, matching the accent usage elsewhere. */
+        button[data-testid="stBaseButton-pills"],
+        button[data-testid="stBaseButton-pillsActive"] {
+            border-radius: 999px;
+            padding: 2px 14px;
+            min-height: 30px;
+            font-family: "Inter", sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            transition: border-color 0.15s ease, color 0.15s ease;
+        }
+        button[data-testid="stBaseButton-pills"] {
+            background: transparent;
+            border: 1px solid var(--kuri-border);
+            color: var(--kuri-text-secondary);
+        }
+        button[data-testid="stBaseButton-pills"]:hover {
+            border-color: var(--kuri-accent);
+            color: var(--kuri-accent);
+            background: transparent;
+        }
+        button[data-testid="stBaseButton-pillsActive"],
+        button[data-testid="stBaseButton-pillsActive"]:hover {
+            background: var(--kuri-accent);
+            border: 1px solid var(--kuri-accent);
+            color: #ffffff;
+        }
+
         /* ---- Last window placeholder ----------------------------------- */
         .kuri-window-placeholder {
             font-size: 15px;
@@ -549,6 +584,39 @@ def _render_value_curve(data: dict[str, Any]) -> None:
             unsafe_allow_html=True,
         )
 
+    # Window pills: narrow the chart to a recent span so hovering a specific
+    # date is practical (4 years compressed into one axis makes day-level
+    # inspection fiddly). ``st.pills`` single-select returns None when the
+    # active pill is clicked again to deselect it; treat that as "All" so the
+    # chart never renders empty. The window's end is the last kuri data point,
+    # not wall-clock today — a stale page still shows a full window. Filtering
+    # happens BEFORE the y-tick/y-range math below, so the y-axis rescales to
+    # the visible span for free.
+    window = (
+        st.pills(
+            "Chart window",
+            ["3M", "6M", "1Y", "All"],
+            default="All",
+            label_visibility="collapsed",
+        )
+        or "All"
+    )
+    view: dict[str, list[dict[str, Any]]] = {
+        "kuri": curve["kuri"],
+        "equal_weight": curve["equal_weight"],
+        "nifty50": curve["nifty50"],
+    }
+    window_start_iso: str | None = None
+    if curve["kuri"]:
+        window_end = datetime.date.fromisoformat(curve["kuri"][-1]["date"])
+        window_start = chart_window_start(window, window_end)
+        if window_start is not None:
+            window_start_iso = window_start.isoformat()
+            view = {
+                key: [p for p in points if p["date"] >= window_start_iso]
+                for key, points in view.items()
+            }
+
     fig = go.Figure()
     # kuri is added FIRST so its area fill renders BENEATH the benchmark
     # lines (Plotly draws traces in add order). The fill is a very faint
@@ -556,9 +624,9 @@ def _render_value_curve(data: dict[str, Any]) -> None:
     # width is 3 for the primary, benchmarks are 0.9 to recede.
     fig.add_trace(
         go.Scatter(
-            x=[p["date"] for p in curve["kuri"]],
-            y=[p["value"] for p in curve["kuri"]],
-            customdata=[format_inr_lakh(p["value"]) for p in curve["kuri"]],
+            x=[p["date"] for p in view["kuri"]],
+            y=[p["value"] for p in view["kuri"]],
+            customdata=[format_inr_lakh(p["value"]) for p in view["kuri"]],
             mode="lines",
             name="kuri",
             line={"width": 3, "color": _ACCENT},
@@ -567,20 +635,20 @@ def _render_value_curve(data: dict[str, Any]) -> None:
             hovertemplate="<b>kuri</b>: %{customdata}<extra></extra>",
         )
     )
-    if curve["equal_weight"]:
+    if view["equal_weight"]:
         fig.add_trace(
             _curve_trace(
-                curve["equal_weight"],
+                view["equal_weight"],
                 name="equal-weight basket",
                 width=0.9,
                 color=_TEXT_TERTIARY,
                 dash="dot",
             )
         )
-    if curve["nifty50"]:
+    if view["nifty50"]:
         fig.add_trace(
             _curve_trace(
-                curve["nifty50"],
+                view["nifty50"],
                 name="Nifty 50 index",
                 width=0.9,
                 color=_TEXT_SECONDARY,
@@ -593,15 +661,18 @@ def _render_value_curve(data: dict[str, Any]) -> None:
     # x-range pads ~10% beyond the last data point, which made the live
     # segment look like a tiny stub when the live tail is short. Explicit
     # range removes the pad entirely.
-    all_dates: list[str] = [p["date"] for p in curve["kuri"]]
+    all_dates: list[str] = [p["date"] for p in view["kuri"]]
     for key in ("equal_weight", "nifty50"):
-        if curve[key]:
-            all_dates.extend(p["date"] for p in curve[key])
+        if view[key]:
+            all_dates.extend(p["date"] for p in view[key])
     xmin = min(all_dates)
     xmax = max(all_dates)
 
+    # The live marker only draws when its date is inside the visible window —
+    # on a short window whose start is after 19 May 2026, a pinned off-canvas
+    # vline would distort the x-range.
     live_start = curve["live_start_date"]
-    if live_start is not None:
+    if live_start is not None and (window_start_iso is None or live_start >= window_start_iso):
         # ``add_vline``'s built-in annotation path fails on string dates
         # (it computes a numeric midpoint internally). Draw the line and
         # place the annotation explicitly.
@@ -622,10 +693,10 @@ def _render_value_curve(data: dict[str, Any]) -> None:
 
     # Y-axis tick formatting: lakh notation (₹25L, ₹26L, ...). Compute tick
     # values across all visible series so labels span the full range.
-    all_values: list[float] = [p["value"] for p in curve["kuri"]]
+    all_values: list[float] = [p["value"] for p in view["kuri"]]
     for k in ("equal_weight", "nifty50"):
-        if curve[k]:
-            all_values.extend(p["value"] for p in curve[k])
+        if view[k]:
+            all_values.extend(p["value"] for p in view[k])
     ymin = min(all_values)
     ymax = max(all_values)
     span = ymax - ymin
@@ -635,20 +706,20 @@ def _render_value_curve(data: dict[str, Any]) -> None:
     tickvals = list(range(tick_start, tick_end + 1, step))
     ticktext = [f"₹{v // 100_000}L" for v in tickvals]
 
-    # X-axis: sparse year-only ticks. ``dtick="M12"`` is Plotly's "every 12
-    # months" for date axes; ``tickformat="%Y"`` strips month/day so the
-    # labels read 2022, 2023, 2024, 2025, 2026 without clutter. Y-axis
-    # range is explicitly clamped slightly tighter than the data span so
-    # the area fill (which technically extends to y=0) only shows the
-    # portion visible above the bottom edge.
+    # X-axis: tick density follows the selected window (yearly '%Y' on All,
+    # down to monthly '%b' on 3M/6M — year-only ticks would collapse to a
+    # single label on short windows). Y-axis range is explicitly clamped
+    # slightly tighter than the data span so the area fill (which technically
+    # extends to y=0) only shows the portion visible above the bottom edge.
+    x_dtick, x_tickformat = chart_window_tick_config(window)
     fig.update_xaxes(
         range=[xmin, xmax],
         showgrid=False,
         showline=False,
         ticks="outside",
         ticklen=6,
-        dtick="M12",
-        tickformat="%Y",
+        dtick=x_dtick,
+        tickformat=x_tickformat,
         tickfont={"size": 13, "color": _TEXT_SECONDARY, "family": "Inter, sans-serif"},
         tickcolor=_BORDER,
     )

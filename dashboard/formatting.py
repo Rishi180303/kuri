@@ -121,6 +121,46 @@ def window_return_label(pct: float) -> tuple[str, str]:
     return (f"▼ {abs(pct):.1f}%", "kuri-negative")
 
 
+_CHART_WINDOW_DAYS: dict[str, int | None] = {"3M": 91, "6M": 182, "1Y": 365, "All": None}
+
+_CHART_WINDOW_TICKS: dict[str, tuple[str, str]] = {
+    "3M": ("M1", "%b"),
+    "6M": ("M1", "%b"),
+    "1Y": ("M3", "%b"),
+    "All": ("M12", "%Y"),
+}
+
+
+def chart_window_start(window: str, end: datetime.date) -> datetime.date | None:
+    """Lower date bound for a value-curve window, or None for the full history.
+
+    ``end`` is the last data point on the chart (not wall-clock today, so a
+    stale page still shows a full window). 3M/6M/1Y subtract fixed day counts
+    (91/182/365) — day-based arithmetic needs no dateutil dependency, and a
+    chart window is a viewing convenience, not a financial calculation.
+    Unknown labels raise so a typo'd window fails loudly instead of silently
+    rendering the full history as if 'All' had been chosen.
+    """
+    if window not in _CHART_WINDOW_DAYS:
+        raise ValueError(f"unknown chart window {window!r}")
+    days = _CHART_WINDOW_DAYS[window]
+    if days is None:
+        return None
+    return end - datetime.timedelta(days=days)
+
+
+def chart_window_tick_config(window: str) -> tuple[str, str]:
+    """Plotly ``(dtick, tickformat)`` for the x-axis of one chart window.
+
+    Year-only ticks collapse to a single label on short windows, so density
+    adapts: monthly '%b' for 3M/6M, quarterly '%b' for 1Y, yearly '%Y' for
+    All (the original full-history styling).
+    """
+    if window not in _CHART_WINDOW_TICKS:
+        raise ValueError(f"unknown chart window {window!r}")
+    return _CHART_WINDOW_TICKS[window]
+
+
 def rebalance_message(*, is_rebalance_day: bool) -> str:
     """Plain-English Today's-Picks lead line. Answers the dad-facing question
     "do I need to do anything today?" without using the word "rebalance".
