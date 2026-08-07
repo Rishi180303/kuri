@@ -57,6 +57,11 @@ _SURFACE = "#f3ede3"
 _TEXT_PRIMARY = "#1c1917"
 _TEXT_SECONDARY = "#57534e"
 _TEXT_TERTIARY = "#a8a29e"
+# Benchmark line colors. Deliberately NOT the text tokens: the text grays are
+# tuned for type on cream, and the lighter two disappear as sub-1px chart
+# lines. Same stone family, one step darker, reserved for the chart.
+_BENCH_EW = "#78716c"
+_BENCH_NIFTY = "#44403c"
 _BORDER = "#e7e0d4"
 _ACCENT = "#c2410c"
 _POSITIVE = "#15803d"
@@ -621,7 +626,8 @@ def _render_value_curve(data: dict[str, Any]) -> None:
     # kuri is added FIRST so its area fill renders BENEATH the benchmark
     # lines (Plotly draws traces in add order). The fill is a very faint
     # terracotta wash that gives the chart depth without dominating; line
-    # width is 3 for the primary, benchmarks are 0.9 to recede.
+    # width is 3 for the primary, benchmarks are 1.6 — clearly readable but
+    # still subordinate (thinner, dashed, stone grays vs solid terracotta).
     fig.add_trace(
         go.Scatter(
             x=[p["date"] for p in view["kuri"]],
@@ -640,8 +646,8 @@ def _render_value_curve(data: dict[str, Any]) -> None:
             _curve_trace(
                 view["equal_weight"],
                 name="equal-weight basket",
-                width=0.9,
-                color=_TEXT_TERTIARY,
+                width=1.6,
+                color=_BENCH_EW,
                 dash="dot",
             )
         )
@@ -650,8 +656,8 @@ def _render_value_curve(data: dict[str, Any]) -> None:
             _curve_trace(
                 view["nifty50"],
                 name="Nifty 50 index",
-                width=0.9,
-                color=_TEXT_SECONDARY,
+                width=1.6,
+                color=_BENCH_NIFTY,
                 dash="dash",
             )
         )
