@@ -701,8 +701,8 @@ def _render_value_curve(data: dict[str, Any]) -> None:
         st.markdown(
             '<div class="kuri-chart-caption">'
             "The equal-weight and Nifty 50 reference lines end where live "
-            "tracking begins. Benchmark comparison resumes once the live feed "
-            "for those is set up."
+            "tracking begins. Their live values are not in yet — they fill in "
+            "on the next daily update."
             "</div>",
             unsafe_allow_html=True,
         )
@@ -745,7 +745,7 @@ def _render_last_completed_window(data: dict[str, Any]) -> None:
         st.markdown(
             '<div class="kuri-window-placeholder">'
             "A 20-day window is in progress. Completed results will appear "
-            "here once one closes (around <strong>early June 2026</strong>)."
+            "here once one closes."
             "</div>",
             unsafe_allow_html=True,
         )
