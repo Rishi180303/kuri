@@ -726,6 +726,11 @@ def _render_value_curve(data: dict[str, Any]) -> None:
         ticklen=6,
         dtick=x_dtick,
         tickformat=x_tickformat,
+        # The unified-hover header inherits ``tickformat`` unless overridden —
+        # which renders as a bare "2026" (All) or "Aug" (3M). ``hoverformat``
+        # pins the header to a full date ("6 August 2026") in every window,
+        # matching short_date_label's prose style elsewhere on the page.
+        hoverformat="%-d %B %Y",
         tickfont={"size": 13, "color": _TEXT_SECONDARY, "family": "Inter, sans-serif"},
         tickcolor=_BORDER,
     )
@@ -768,11 +773,16 @@ def _render_value_curve(data: dict[str, Any]) -> None:
         xaxis_title=None,
         yaxis_title=None,
         hovermode="x unified",
+        # No drag-zoom: the axes are explicitly ranged, so Plotly's zoom
+        # gestures (drag, double-click reset) either trap the viewer in a
+        # zoomed state with no visible way back or do nothing at all. The
+        # window pills are the one range control; hover stays on.
+        dragmode=False,
     )
     st.plotly_chart(
         fig,
         use_container_width=True,
-        config={"displayModeBar": False, "displaylogo": False},
+        config={"displayModeBar": False, "displaylogo": False, "doubleClick": False},
     )
     if curve["benchmarks_live_pending"]:
         st.markdown(
