@@ -6,9 +6,9 @@ The idea: every market day, fetch the latest NSE data, compute features, run the
 
 ## Stack
 
-Polars, DuckDB, Parquet, Pydantic for the data layer. Prefect 3 for orchestration. scikit-learn, LightGBM, Optuna for ML, with MLflow for tracking. SQLite for paper-trading state and Cloudflare R2 for durability across ephemeral cron runs. Tooling is uv, ruff, mypy strict, pytest, structlog, pre-commit.
+Polars, DuckDB, Parquet, Pydantic for the data layer. Prefect 3 for orchestration. scikit-learn, LightGBM, Optuna for ML, with MLflow for tracking. SQLite for paper-trading state and Cloudflare R2 for durability across ephemeral cron runs. GitHub Actions runs the daily cron. Streamlit and Plotly for the dashboard, deployed on Streamlit Community Cloud. Tooling is uv, ruff, mypy strict, pytest, structlog, pre-commit.
 
-Planned: FastAPI for serving (Phase 6), Streamlit for the dashboard (Phase 7), Docker, GitHub Actions, and AWS for infra (Phase 8). PyTorch and pytorch-forecasting for advanced models are deferred (Phase 3 Chunk 3).
+Planned: FastAPI for serving (Phase 6); Docker, scheduled retraining with promotion gates, and monitoring for MLOps (Phase 8). PyTorch and pytorch-forecasting for advanced models are deferred (Phase 3 Chunk 3).
 
 ## Getting started
 
@@ -38,7 +38,7 @@ See `reports/backtest_v2/SUMMARY.md` for the full report (verification findings,
 
 ## Daily operation
 
-The system runs autonomously via GitHub Actions cron at 11:00 UTC on weekdays (16:30 IST, about one hour after the Indian market close). State persists across ephemeral runners through Cloudflare R2: `state.db` plus the runtime data prefixes (raw OHLCV, features, labels, models) sync down at job start and back up at job end. Backfilling the simulator from 2022-07-04 reproduces Phase 4's `portfolio_history.csv` to 1.30e-15 relative tolerance — the daily lifecycle is a methodologically faithful wrapper around the backtest engine, not a reimplementation. Daily picks are written to a SQLite database; surfacing them to humans is the Phase 7 dashboard's job.
+The system runs autonomously via GitHub Actions cron at 11:00 UTC on weekdays (16:30 IST, about one hour after the Indian market close). State persists across ephemeral runners through Cloudflare R2: `state.db` plus the runtime data prefixes (raw OHLCV, features, labels, models) sync down at job start and back up at job end. Backfilling the simulator from 2022-07-04 reproduces Phase 4's `portfolio_history.csv` to 1.30e-15 relative tolerance — the daily lifecycle is a methodologically faithful wrapper around the backtest engine, not a reimplementation. Daily picks are written to a SQLite database. After each run the cron regenerates `dashboard/data.json` and commits it, and the Streamlit page in `dashboard/` renders it: today's picks, rebalance timing, and a value curve that extends the Phase 4 backtest into live tracking against Nifty 50 and equal-weight benchmarks recomputed daily by the same engine.
 
 ## Layout
 
@@ -51,12 +51,23 @@ src/trading/
   features/             price, volatility, trend, momentum, volume,
                         microstructure, cross_sectional, regime,
                         persistence, interactions, pipeline, store
+  labels/               forward-return labels + store
   models/               LightGBM classifier and base model interface
   training/             walk-forward training + Optuna tuning + evaluation
+  backtest/             engine, costs, slippage, metrics, fold router, report
+  papertrading/         daily lifecycle, SQLite store + schema, regime,
+                        live benchmark feed
+  dashboard/            build_data.py, writes dashboard/data.json in the cron
   pipelines/            Prefect flows (data side)
   cli.py                typer CLI
+dashboard/              Streamlit app + formatting helpers; reads data.json only
+docs/                   ADRs and runbooks
+reports/backtest_v2/    Phase 4 report, plots, verification artifacts
+scripts/                retrain, backfill, parity and audit scripts
 tests/                  pytest
 data/
   raw/                  OHLCV + index, gitignored
   features/v{n}/        per_ticker + regime, gitignored
+  labels/               forward-return labels, gitignored
+  papertrading/         state.db, gitignored (synced via R2)
 ```
