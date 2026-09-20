@@ -138,6 +138,14 @@ jobs:
       - name: Upload state.db to R2
         if: always()  # Upload even if the run had non-fatal issues so DATA_STALE rows persist.
         run: |
+          # Deliberately NOT gated on the sync-back step succeeding (decided
+          # 2026-09-19). If sync-back partially fails, R2's runtime/raw/ is a
+          # few tickers stale while state.db carries today's daily_runs row;
+          # the next `kuri update` re-fetches from each ticker's own latest
+          # date, so the raw store self-heals. Gating on success() would drop
+          # today's daily_runs row instead, and the retry contract reads a
+          # missing row as "unexpected failure" — a worse outcome.
+          #
           # See "Download state.db from R2" for retry rationale.
           retry() {
             local n=0
