@@ -13,9 +13,20 @@
 # singletons (1 ticker only); cross-sectional sector-relative features will
 # emit null for those rather than imputing degenerate zero-variance ranks.
 #
-# KNOWN GAP: TATAMOTORS is excluded for now. Yahoo Finance's data feed for
-# `TATAMOTORS.NS` has been broken since the Oct 2024 demerger. Revisit when
-# Yahoo fixes the feed, or when we add an NSE-direct fetcher as a fallback.
+# KNOWN GAP: Tata Motors is excluded. `TATAMOTORS.NS` is gone from Yahoo
+# (404) since the demerger; the Nifty 50 seat is now TMPV (passenger
+# vehicles), with TMCV (commercial vehicles) listed separately 2025-11-12.
+# Checked 2026-09-19: `TMPV.NS` serves full history back to 2018-01-01, so
+# the feed is no longer the blocker and no NSE-direct fetcher is needed.
+# Two things still block re-admission, both belonging to the next retrain:
+#   1. yfinance does NOT adjust for the spin-off. Close goes 660.75 -> 395.45
+#      on the 2025-10-14 ex-date and adj_close carries the same -40% step,
+#      which is not a real loss (holders received TMCV shares). Pre-ex-date
+#      prices need a manual demerger factor before any feature or label
+#      touches them.
+#   2. Universe membership feeds every cross-sectional feature, so adding a
+#      ticker under the frozen fold models changes their inputs. Re-admit
+#      only together with a full walk-forward retrain.
 
 as_of: "2026-04-28"
 index: "NIFTY 50"
