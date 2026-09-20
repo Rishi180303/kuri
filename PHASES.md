@@ -1,19 +1,19 @@
 # Kuri — phase progress (local)
 
-Detailed phase-by-phase build progress. **This file is gitignored — kept local only.**
+Detailed phase-by-phase build progress. Tracked in git since `cb61b56`; the "(local)" in the title is historical.
 The public README has the project overview; this file has implementation status, methodology details, and per-phase results.
 
 ## Status
 
-Phases 1-4 complete. Phase 5 (paper trading) is substantively operational — the daily cron fires autonomously and the lifecycle is methodologically faithful to Phase 4 at 1.30e-15. The remaining Phase 5 work is Task 15: a soak window of clean scheduled cron fires before declaring Phase 5 closed.
+Phases 1-5 and 7 complete and live. The daily cron has fired autonomously every weekday since May 2026 and the lifecycle is methodologically faithful to Phase 4 at 1.30e-15. Phase 5's last task, the Task 15 soak window, closed on 2026-09-19 (evidence under "Headline operational status"). Open: Phase 6 (serving) and Phase 8 (MLOps), with retraining the most important piece of Phase 8 — every live date routes to fold 15, trained through 2025-09-26.
 
 1. **Data pipeline.** Done. yfinance ingestion, validation, parquet plus DuckDB storage, Prefect flows, typer CLI, structlog.
 2. **Feature engineering.** Done. 74 features across price, volatility, trend, momentum, volume, microstructure, cross sectional ranks, regime signals, trend-persistence, and a cross-feature interaction. Every module has a parametrized lookahead-bias test. ~280 tests under ruff and mypy strict.
 3. **Modeling.** LightGBM v2 baseline done; results below. Walk-forward validation, Optuna tuning, MLflow tracking, diagnostic-driven feature engineering. Temporal Fusion Transformer and ensemble meta-learner are deferred future work — modest baseline IC means the marginal value of an ensemble is too low compared to completing the rest of the system.
 4. **Backtesting.** Done. Realistic backtest engine with Indian transaction costs and ADV-bucketed slippage; 16 walk-forward folds (0-15) stitched over 2022-07-04 → 2026-04-01, 47 rebalances; full results below.
-5. **Paper trading.** Daily simulator that fetches data, computes features, predicts, updates a simulated portfolio, and logs everything for honest tracking over time.
+5. **Paper trading.** Done. Daily simulator that fetches data, computes features, predicts, updates a simulated portfolio, and logs everything for honest tracking over time.
 6. **Serving.** Containerized FastAPI exposing predictions, portfolio state, and historical performance.
-7. **Dashboard.** Streamlit. Today's picks with confidence and reasoning, portfolio performance, per stock deep dives, SHAP explanations.
+7. **Dashboard.** Done for the core page: Streamlit on Community Cloud with today's picks, rebalance timing, rank movement, and the value curve against both benchmarks. Per-stock deep dives and SHAP explanations were in the original scope and are not built.
 8. **MLOps.** Monthly retraining with promotion gates, DVC for data versioning, CI/CD via GitHub Actions, monitoring and alerts.
 
 ## Methodology
@@ -201,7 +201,9 @@ Year-10 aggregate projection ≈ **40 MiB** — roughly 250× under R2's 10 GB f
 
 ### Headline operational status
 
-As of 2026-05-13, cron run #11 fired autonomously under schedule trigger (no manual `workflow_dispatch`), 1m 6s wall-clock, all 11 steps green. The daily lifecycle prints a single line per run summarizing status / picks / fold (e.g. `2026-05-13 success picks=0 fold=15`). Daily picks are persisted to `state.db` but not yet surfaced to humans — that's the Phase 7 dashboard's job. Task 15 is the remaining Phase 5 work: a roughly one-week soak window of clean scheduled cron fires before declaring Phase 5 closed.
+As of 2026-05-13, cron run #11 fired autonomously under schedule trigger (no manual `workflow_dispatch`), 1m 6s wall-clock, all 11 steps green. The daily lifecycle prints a single line per run summarizing status / picks / fold (e.g. `2026-05-13 success picks=0 fold=15`). Daily picks are persisted to `state.db` but not yet surfaced to humans — that's the Phase 7 dashboard's job. Task 15 was the remaining Phase 5 work: a soak window of clean scheduled cron fires before declaring Phase 5 closed.
+
+**Soak closed 2026-09-19.** The cron committed `dashboard/data.json` on all 89 weekdays from 2026-05-19 through 2026-09-18 with no gaps, and the strategy curve has a live point on every one of them. The one real outage in that stretch (the 2026-05-13..19 DATA_STALE cascade from a one-day `vol_regime` warmup shortfall) was fixed at the root in `f060e80` and `9eead99` before live tracking began.
 
 ## Dashboard (Phase 7)
 
@@ -213,6 +215,28 @@ The two benchmark lines originally ended at the Phase 4 backtest cutoff (2026-04
 
 Two disclosed seams. First, the restarted equal-weight sim pays a one-time full-basket entry cost (~13 bps) at the anchor that Phase 4's continuous sim would not have paid that day. Second, the live sim runs on the current 50-ticker universe while the backtest-era CSV is the frozen 49-ticker Phase 4 artifact — the live strategy itself trades the current universe, so the live-era comparison is apples-to-apples.
 
-Daily full recompute from a fixed anchor makes the feed deterministic and self-healing: missed cron days and yfinance adjusted-price revisions correct themselves on the next run. Days where any universe ticker is missing a row are skipped rather than crashed on or forward-filled — a buy-and-hold NAV marked on the next complete day is arithmetically exact, and forward-filling inside the shared engine would compromise Phase 4 reproducibility. This rule was validated the day it was written: LTM has a one-day gap on 2026-05-01 (a real NSE session; a yfinance artifact of the LTIM→LTM rename) that crashed the first end-to-end run because the restarted sim's first rebalance landed exactly on it.
+Daily full recompute from a fixed anchor makes the feed deterministic and self-healing: missed cron days and yfinance adjusted-price revisions correct themselves on the next run. Days where any universe ticker is missing a row are skipped rather than crashed on or forward-filled — a buy-and-hold NAV marked on the next complete day is arithmetically exact, and forward-filling inside the shared engine would compromise Phase 4 reproducibility. This rule was validated the day it was written: LTM has no row on 2026-05-01 while the other 49 tickers do, which crashed the first end-to-end run because the restarted sim's first rebalance landed exactly on it. (Originally read as an LTM gap on a real session. It is the reverse: 2026-05-01 was an NSE holiday and the 49 rows are Yahoo placeholders — see the 2026-09-19 close-out below.)
 
 `last_completed_window` populates once two consecutive live rebalances have full benchmark coverage, reporting the strategy's window return alongside the same-period Nifty 50 and equal-weight returns — all three or nothing, so a strategy-only number can never appear without benchmark context.
+
+
+## Open-item close-out (2026-09-19)
+
+A pass over the small items left open since the Phase 5 handoff. Several turned out to share one root cause.
+
+**Yahoo serves placeholder rows on NSE holidays.** On weekday NSE holidays Yahoo returns a row per equity with open = high = low = close = the prior close and volume 0. The indices correctly have no row. In the store today: 2025-03-18 (49 of 50 tickers zero-volume, index did trade — a volume glitch rather than a holiday), 2026-01-15 (Maharashtra civic polls), 2026-05-01 (Maharashtra Day), 2026-05-28, 2026-06-26 and 2026-09-14. This explains two older puzzles:
+
+* *The 2026-01-16 DATA_STALE day.* The lifecycle reads features at t-1. For target 2026-01-16 that is 2026-01-15, a placeholder day on which the equity calendar has a date but NSEI has no row, so `nifty_above_sma_200` and the VIX features are null. The null was never on 2026-01-16 itself. Since `9eead99` this degrades to an UNKNOWN regime label instead of DATA_STALE.
+* *The "LTM gap" on 2026-05-01.* LTM was refetched from `LTM.NS` after the rename and at that time Yahoo had no placeholder for it, so it was the only ticker without the fake row.
+
+Two consequences are live and **not yet fixed, pending a decision**: the live CLI has no holiday detection, so a holiday is processed as a trading day (NAV carried flat, a SUCCESS `daily_runs` row written) and counts toward the 20-day rebalance cadence — three such days so far (05-28, 06-26, 09-14); and the placeholder rows enter rolling features as zero-return, zero-volume days. `RunStatus.SKIPPED_HOLIDAY` exists and the cadence counter already excludes it, but nothing writes it. Pre-anchor placeholder rows (2025-03-18, 2026-01-15) must stay untouched either way, because the frozen Phase 4 artifacts were computed with them.
+
+**Index holes are real and now healable.** NSEI, CRSLDX and INDIAVIX were missing 2026-04-29 and 2026-04-30 (genuine sessions). The daily update refetches only a trailing 10 days of index history, so a hole older than that never healed. `kuri update --index-lookback-days N` widens the window and the workflow exposes it as a `workflow_dispatch` input; Yahoo now serves both days. Healing them fills two missing points on the Nifty line and un-nulls the regime features on those dates.
+
+**Decided: the state.db upload stays ungated** on the R2 sync-back step. A partial sync-back self-heals through the per-ticker latest-date check, whereas gating would drop the day's `daily_runs` row, which the retry contract reads as an unexpected failure. Recorded in the workflow.
+
+**Tata Motors.** `TATAMOTORS.NS` is gone from Yahoo, but `TMPV.NS` now serves full history back to 2018, so no NSE-direct fetcher is needed. Re-admission is still blocked: Yahoo does not adjust for the 2025-10-14 demerger (close and adj_close both step 660.75 → 395.45), and a universe change alters every cross-sectional feature under frozen models. Both belong to the next full retrain. Details in `configs/universe.yaml`.
+
+**Tooling.** ruff moved from 0.8 to 0.16 in the dev pin and pre-commit, with the format reflow absorbed as its own commit.
+
+**Found while here, not acted on.** The raw store appends rows at fetch time, so each row's `adj_close` reflects only dividends known on the day it was fetched. Live-era returns across ex-dividend dates therefore carry the raw price drop (ITC's stored 2026-05-13 adj/close ratio is 1.000 against Yahoo's current 0.973). All three live curves are price-return so the comparison stays fair, but a full refetch is the right first step of any retrain.
