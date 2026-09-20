@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ from trading.config import (
     PipelineConfig,
     ValidationConfig,
 )
+from trading.data.fetcher import _to_polars
 from trading.pipelines.backfill import backfill_flow
 from trading.pipelines.update import daily_update_flow
 from trading.storage import DataStore
@@ -129,6 +130,39 @@ def test_daily_update_skips_when_current(tmp_data_dir: Path, monkeypatch: Any) -
     result = daily_update_flow(tickers=["RELIANCE"], include_indices=False, cfg=cfg)
     assert result["RELIANCE"] == 0
     assert called["n"] == 0  # we never called yfinance for this ticker
+
+
+def test_daily_update_index_lookback_heals_an_old_hole(
+    tmp_data_dir: Path, monkeypatch: Any
+) -> None:
+    """A hole older than the default 10-day index window never heals on its
+    own (2026-04-29/30 NSEI sat missing for months). A wider lookback must
+    move the fetch start back and merge the refetched day into the store."""
+    cfg = _cfg(tmp_data_dir)
+    store = DataStore(tmp_data_dir)
+    today = date.today()
+    days = [d.date() for d in pd.bdate_range(end=today, periods=40)]
+    hole = days[5]  # ~35 business days back: far outside the 10-day default
+    seeded = _to_polars(_fake_pandas_frame(days[0].isoformat(), 40), "^NSEI")
+    store.save_index("^NSEI", seeded.filter(pl.col("date") != hole))
+    assert hole not in store.load_index("^NSEI")["date"].to_list()
+
+    # The one equity ticker is already current, so only index fetches happen.
+    current = _to_polars(_fake_pandas_frame(days[-1].isoformat(), 1), "RELIANCE")
+    store.save_ohlcv("RELIANCE", current.with_columns(pl.lit(today).alias("date")))
+
+    starts: list[str] = []
+
+    def fake_dl(tickers: str, **kwargs: Any) -> pd.DataFrame:
+        starts.append(kwargs["start"])
+        return _fake_pandas_frame(days[0].isoformat(), 40)
+
+    monkeypatch.setattr("trading.data.fetcher.yf.download", fake_dl)
+
+    daily_update_flow(tickers=["RELIANCE"], include_indices=True, cfg=cfg, index_lookback_days=90)
+
+    assert set(starts) == {(today - timedelta(days=90)).isoformat()}
+    assert hole in store.load_index("^NSEI")["date"].to_list()
 
 
 def test_backfill_throttles_between_fetches(tmp_data_dir: Path, monkeypatch: Any) -> None:

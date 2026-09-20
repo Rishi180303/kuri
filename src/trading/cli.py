@@ -159,11 +159,18 @@ def backfill(
 
 
 @app.command()
-def update() -> None:
+def update(
+    index_lookback_days: int = typer.Option(
+        10,
+        "--index-lookback-days",
+        min=1,
+        help="Calendar days of index history to refetch and merge. Widen once to heal an old index hole.",
+    ),
+) -> None:
     """Fetch the latest data for every universe ticker."""
     log = get_logger("cli.update")
-    log.info("cli.update.start")
-    results = daily_update_flow()
+    log.info("cli.update.start", index_lookback_days=index_lookback_days)
+    results = daily_update_flow(index_lookback_days=index_lookback_days)
     new_rows = sum(results.values())
     typer.echo(f"Daily update complete: {new_rows} new rows across {len(results)} symbols.")
 

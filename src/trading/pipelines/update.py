@@ -3,6 +3,10 @@
 For each ticker we read the latest stored date and fetch from
 `latest + 1 day` to today. Tickers with no stored data fall back to the
 configured backfill start.
+
+Indices are refetched over a trailing window instead and merged by date, so
+an index day Yahoo was late to publish heals on a later run. A hole older
+than the window needs a one-off wider `index_lookback_days`.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ def daily_update_flow(
     tickers: list[str] | None = None,
     include_indices: bool = True,
     cfg: PipelineConfig | None = None,
+    index_lookback_days: int = 10,
 ) -> dict[str, int]:
     logger = get_run_logger()
     cfg = cfg or get_pipeline_config()
@@ -62,7 +67,9 @@ def daily_update_flow(
     if include_indices:
         for symbol in (cfg.indices.nifty_50, cfg.indices.nifty_500, cfg.indices.india_vix):
             throttle()
-            df_idx = fetch_index_task(symbol, today - timedelta(days=10), None, cfg.fetch)
+            df_idx = fetch_index_task(
+                symbol, today - timedelta(days=index_lookback_days), None, cfg.fetch
+            )
             save_index_task(symbol, df_idx, cfg.paths)
             results[symbol] = df_idx.height
 
