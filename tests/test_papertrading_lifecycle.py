@@ -1300,3 +1300,108 @@ def test_partial_universe_on_feature_date_raises_uncaught(tmp_path: Path) -> Non
     )
 
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# 14. Placeholder-holiday guard (live path only; run_daily stays untouched)
+# ---------------------------------------------------------------------------
+
+
+def _with_zero_volume_on(
+    ohlcv: pl.DataFrame, day: datetime.date, *, except_ticker: str | None = None
+) -> pl.DataFrame:
+    """Reshape ``day`` into what Yahoo serves on an NSE holiday: volume 0."""
+    hit = pl.col("date") == day
+    if except_ticker is not None:
+        hit = hit & (pl.col("ticker") != except_ticker)
+    return ohlcv.with_columns(pl.when(hit).then(0.0).otherwise(pl.col("volume")).alias("volume"))
+
+
+def test_placeholder_holiday_is_recorded_as_skipped_and_writes_nothing_else(
+    tmp_path: Path,
+) -> None:
+    """On an NSE holiday Yahoo serves one zero-volume row per equity. The live
+    path must close the day as SKIPPED_HOLIDAY — no portfolio_state row, so
+    the day neither marks the book nor counts toward the rebalance cadence."""
+    from trading.papertrading.lifecycle import skip_placeholder_holiday
+
+    seed_date, target = datetime.date(2024, 1, 2), datetime.date(2024, 1, 3)
+    store = _make_store(tmp_path)
+    _seed_initial_state(store, seed_date)
+    ohlcv = _with_zero_volume_on(_make_ohlcv(end=target), target)
+
+    record = skip_placeholder_holiday(target, store, ohlcv)
+
+    assert record is not None
+    assert record.status == RunStatus.SKIPPED_HOLIDAY
+    assert record.source == RunSource.LIVE
+    stored = store.get_run(target)
+    assert stored is not None and stored.status == RunStatus.SKIPPED_HOLIDAY
+    latest_state = store.get_latest_portfolio_state()
+    assert latest_state is not None and latest_state.date == seed_date
+    store.close()
+
+
+def test_a_day_with_any_traded_ticker_is_not_a_placeholder_holiday(tmp_path: Path) -> None:
+    """2025-03-18 shape: 49 of 50 tickers show volume 0 yet the market traded.
+    One real print is enough to call it a session and leave it to run_daily."""
+    from trading.papertrading.lifecycle import skip_placeholder_holiday
+
+    seed_date, target = datetime.date(2024, 1, 2), datetime.date(2024, 1, 3)
+    store = _make_store(tmp_path)
+    _seed_initial_state(store, seed_date)
+    ohlcv = _with_zero_volume_on(_make_ohlcv(end=target), target, except_ticker=TICKERS[0])
+
+    assert skip_placeholder_holiday(target, store, ohlcv) is None
+    assert store.get_run(target) is None
+    store.close()
+
+
+def test_placeholder_holiday_never_overwrites_an_existing_run(tmp_path: Path) -> None:
+    """Holidays already processed the old way hold a SUCCESS row. A rerun must
+    hand that row back untouched rather than rewrite live history."""
+    from trading.papertrading.lifecycle import skip_placeholder_holiday
+
+    seed_date = datetime.date(2024, 1, 2)
+    store = _make_store(tmp_path)
+    _seed_initial_state(store, seed_date)  # writes a SUCCESS row on seed_date
+    ohlcv = _with_zero_volume_on(_make_ohlcv(end=seed_date), seed_date)
+
+    record = skip_placeholder_holiday(seed_date, store, ohlcv)
+
+    assert record is not None and record.status == RunStatus.SUCCESS
+    stored = store.get_run(seed_date)
+    assert stored is not None and stored.status == RunStatus.SUCCESS
+    store.close()
+
+
+def test_placeholder_holiday_detection_on_real_ohlcv() -> None:
+    """Real-OHLCV lock on the zero-volume signature. 2026-05-01 matters most:
+    49 tickers hold a placeholder and LTM has no row at all, which is how the
+    day was first misread as an LTM data gap. 2025-03-18 is the trap on the
+    other side: 49 zero-volume rows on a day the market really traded."""
+    import datetime as dt
+
+    from trading.backtest.data import load_universe_ohlcv
+    from trading.papertrading.lifecycle import is_placeholder_holiday
+
+    if not Path("data/raw/ohlcv").exists():
+        pytest.skip("real OHLCV store not present")
+    ohlcv = load_universe_ohlcv(start=dt.date(2025, 3, 1), end=dt.date(2026, 5, 29))
+    stored_dates = set(ohlcv["date"].to_list())
+    holidays = [dt.date(2026, 1, 15), dt.date(2026, 5, 1), dt.date(2026, 5, 28)]
+    sessions = [dt.date(2025, 3, 18), dt.date(2026, 4, 30), dt.date(2026, 5, 27)]
+    if not stored_dates.issuperset(holidays + sessions):
+        pytest.skip("real OHLCV store does not reach 2026-05-28")
+
+    for day in holidays:
+        assert is_placeholder_holiday(ohlcv, day), f"{day} is an NSE holiday"
+    for day in sessions:
+        assert not is_placeholder_holiday(ohlcv, day), f"{day} was a real session"
+
+
+def test_an_empty_ohlcv_frame_is_not_a_placeholder_holiday() -> None:
+    """No data at all is an outage, not a holiday: stay on the run_daily path."""
+    from trading.papertrading.lifecycle import is_placeholder_holiday
+
+    assert not is_placeholder_holiday(pl.DataFrame(), datetime.date(2024, 1, 3))

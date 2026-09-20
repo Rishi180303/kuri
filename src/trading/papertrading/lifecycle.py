@@ -43,6 +43,17 @@ not consume ``regime_label``; it is metadata, and a feature-pipeline issue
 must not block live operations. The 2026-05-13..19 DATA_STALE cascade was
 the direct evidence that this needs to be non-blocking.
 
+Placeholder holidays (live path only, since 2026-09-19)
+=======================================================
+On a weekday NSE holiday Yahoo serves one row per equity with OHLC pinned to
+the prior close and volume 0. :func:`skip_placeholder_holiday` recognises
+that signature and closes the day as ``SKIPPED_HOLIDAY`` before
+:func:`run_daily` is reached, so a holiday never marks the book, never
+counts toward the rebalance cadence, and can never host a rebalance against
+placeholder prices. ``run_daily`` itself is deliberately unaware of this:
+the backfill replays 2026-01-15, a placeholder day the frozen Phase 4
+artifacts were computed with, and skipping it there would break parity.
+
 See docs/superpowers/specs/2026-05-03-phase5-papertrading-design.md,
 Sections 7 and 10.
 """
@@ -256,6 +267,50 @@ def run_daily(
         git_sha=git_sha,
         source=source,
         model_fold_id_used=fold_id,
+    )
+    store.write_daily_run(record)
+    return record
+
+
+def is_placeholder_holiday(universe_ohlcv: pl.DataFrame, target_date: datetime.date) -> bool:
+    """True when ``target_date`` has equity rows and none of them traded.
+
+    A single ticker with real volume makes it a session: 2025-03-18 shows 49
+    of 50 tickers at volume 0 on a day the index traded normally. A date
+    with no rows at all is NOT treated as a holiday — that is
+    indistinguishable from a fetch outage and stays on the ``run_daily`` path.
+    """
+    if universe_ohlcv.is_empty():
+        return False
+    day = universe_ohlcv.filter(pl.col("date") == target_date)
+    return day.height > 0 and bool((day["volume"] == 0).all())
+
+
+def skip_placeholder_holiday(
+    target_date: datetime.date,
+    store: PaperTradingStore,
+    universe_ohlcv: pl.DataFrame,
+    *,
+    git_sha: str = "",
+) -> RunRecord | None:
+    """Close ``target_date`` as ``SKIPPED_HOLIDAY`` if it is a placeholder day.
+
+    Returns ``None`` on a real session so the caller proceeds to
+    :func:`run_daily`. A date that already has a ``daily_runs`` row is handed
+    back untouched — holidays processed before this guard existed keep their
+    SUCCESS rows; live history is never rewritten.
+    """
+    if not is_placeholder_holiday(universe_ohlcv, target_date):
+        return None
+    existing = store.get_run(target_date)
+    if existing is not None:
+        return existing
+    record = RunRecord(
+        run_date=target_date,
+        run_timestamp=datetime.datetime.now(datetime.UTC),
+        status=RunStatus.SKIPPED_HOLIDAY,
+        git_sha=git_sha,
+        source=RunSource.LIVE,
     )
     store.write_daily_run(record)
     return record
