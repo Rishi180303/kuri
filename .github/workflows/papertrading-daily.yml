@@ -6,6 +6,10 @@ on:
     # Weekdays only; NSE is closed on weekends.
     - cron: "0 11 * * 1-5"
   workflow_dispatch:  # manual trigger for testing
+    inputs:
+      index_lookback_days:
+        description: "Calendar days of index history to refetch; widen once to heal an old index hole"
+        default: "10"
 
 jobs:
   run:
@@ -95,7 +99,9 @@ jobs:
           echo "Synced runtime data from R2"
 
       - name: Fetch today's OHLCV
-        run: uv run kuri update
+        env:
+          INDEX_LOOKBACK_DAYS: ${{ inputs.index_lookback_days || '10' }}  # inputs is empty on schedule
+        run: uv run kuri update --index-lookback-days "$INDEX_LOOKBACK_DAYS"
 
       - name: Recompute features through today
         run: uv run kuri features update
