@@ -195,7 +195,7 @@ def format_inr_lakh(value: float) -> str:
 
     Example: ``2611623`` becomes ``"₹26,11,623"``. Rounds to integer rupees.
     """
-    n = int(round(value))
+    n = round(value)
     if n < 0:
         return "-" + format_inr_lakh(-n)
     s = str(n)
