@@ -170,9 +170,9 @@ def test_pipeline_special_session_masking(
     on_special = pt.filter(pl.col("date") == special)
     assert on_special.height == len(universe.symbols)
     for col in masked_cols:
-        assert (
-            on_special[col].null_count() == on_special.height
-        ), f"{col} should be all-null on special session {special}"
+        assert on_special[col].null_count() == on_special.height, (
+            f"{col} should be all-null on special session {special}"
+        )
 
     # KEEP columns should have at least one non-null value on the special date.
     keep_cols_with_data = []
@@ -184,9 +184,9 @@ def test_pipeline_special_session_masking(
         ):
             keep_cols_with_data.append(m.name)
     if keep_cols_with_data:
-        assert any(
-            on_special[c].drop_nulls().len() > 0 for c in keep_cols_with_data
-        ), "no KEEP feature has any value on special session — masking too aggressive"
+        assert any(on_special[c].drop_nulls().len() > 0 for c in keep_cols_with_data), (
+            "no KEEP feature has any value on special session — masking too aggressive"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -285,9 +285,9 @@ def test_vol_regime_warmup_binds_features_update_window(
     # Window too short: 271 trading days = 270 day-offset (inclusive both ends).
     pt_short = _build(start_offset_days=270)
     n_dates_short = pt_short["date"].n_unique()
-    assert (
-        n_dates_short == 271
-    ), f"setup: expected 271 trading days in the short window, got {n_dates_short}"
+    assert n_dates_short == 271, (
+        f"setup: expected 271 trading days in the short window, got {n_dates_short}"
+    )
     non_null_short = pt_short.filter(pl.col("vol_regime").is_not_null()).height
     assert non_null_short == 0, (
         f"binding-constraint regression: at 271 trading days vol_regime should "
@@ -299,9 +299,9 @@ def test_vol_regime_warmup_binds_features_update_window(
     # Window sufficient: 300 trading days = 299 day-offset.
     pt_long = _build(start_offset_days=299)
     n_dates_long = pt_long["date"].n_unique()
-    assert (
-        n_dates_long == 300
-    ), f"setup: expected 300 trading days in the long window, got {n_dates_long}"
+    assert n_dates_long == 300, (
+        f"setup: expected 300 trading days in the long window, got {n_dates_long}"
+    )
     last_date = pt_long["date"].max()
     non_null_on_last = pt_long.filter(
         (pl.col("date") == last_date) & pl.col("vol_regime").is_not_null()

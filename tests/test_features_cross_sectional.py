@@ -225,9 +225,9 @@ def test_beta_robust_to_index_missing_dates(cfg: FeatureConfig) -> None:
     # (this was the bug: a single null poisoned the next 60 rolling rows).
     after = out.filter(pl.col("date") > missing_date).sort("date")[beta_col]
     later_window = after.tail(60).drop_nulls()
-    assert (
-        later_window.len() > 0
-    ), "post-missing-date window has no non-null beta — null poisoning regression"
+    assert later_window.len() > 0, (
+        "post-missing-date window has no non-null beta — null poisoning regression"
+    )
 
 
 def test_universe_rank_handles_ties(cfg: FeatureConfig) -> None:

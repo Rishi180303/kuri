@@ -406,9 +406,9 @@ def test_backfill_cold_start_seeds_initial_state(tmp_path: Path) -> None:
 
     assert seed_rows, "No seed portfolio_state row written before start_date"
     seed_row = max(seed_rows, key=lambda r: r[0])
-    assert (
-        float(seed_row[1]) == _INITIAL_CAPITAL
-    ), f"Seed cash expected {_INITIAL_CAPITAL}, got {seed_row[1]}"
+    assert float(seed_row[1]) == _INITIAL_CAPITAL, (
+        f"Seed cash expected {_INITIAL_CAPITAL}, got {seed_row[1]}"
+    )
     assert seed_row[2] == 0, f"Seed n_positions expected 0, got {seed_row[2]}"
     assert seed_row[3] == "backtest", f"Seed source expected 'backtest', got {seed_row[3]}"
 
@@ -439,9 +439,9 @@ def test_backfill_summary_at_end(tmp_path: Path, capsys: pytest.CaptureFixture[s
     print(summary)
 
     captured = capsys.readouterr()
-    assert (
-        "Backfill complete:" in captured.out
-    ), f"Summary line not found in stdout.\nGot: {captured.out!r}"
+    assert "Backfill complete:" in captured.out, (
+        f"Summary line not found in stdout.\nGot: {captured.out!r}"
+    )
     assert "succeeded" in captured.out
     assert "failed" in captured.out
     assert "skipped" in captured.out

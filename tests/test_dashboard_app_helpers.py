@@ -296,6 +296,6 @@ def test_app_constructs_freshness_label_once_and_threads_it_to_header_and_footer
             if other_name != renderer and other_start - 1 > start:
                 end = min(end, other_start - 1)
         body = "\n".join(lines[start:end])
-        assert (
-            "freshness_label" in body
-        ), f"{renderer} must reference the freshness_label parameter in its body."
+        assert "freshness_label" in body, (
+            f"{renderer} must reference the freshness_label parameter in its body."
+        )

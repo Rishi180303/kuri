@@ -60,12 +60,12 @@ def test_embargo_respected() -> None:
     ):
         gap_train_to_val = (split.val_dates[0] - split.train_dates[1]).days
         gap_val_to_test = (split.test_dates[0] - split.val_dates[1]).days
-        assert (
-            gap_train_to_val > embargo
-        ), f"fold {split.fold_id}: train→val gap {gap_train_to_val} <= embargo"
-        assert (
-            gap_val_to_test > embargo
-        ), f"fold {split.fold_id}: val→test gap {gap_val_to_test} <= embargo"
+        assert gap_train_to_val > embargo, (
+            f"fold {split.fold_id}: train→val gap {gap_train_to_val} <= embargo"
+        )
+        assert gap_val_to_test > embargo, (
+            f"fold {split.fold_id}: val→test gap {gap_val_to_test} <= embargo"
+        )
 
 
 def test_training_window_expands_across_folds() -> None:

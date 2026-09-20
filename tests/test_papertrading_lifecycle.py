@@ -406,9 +406,9 @@ def test_nan_features_produce_data_stale_no_main_transaction(tmp_path: Path) -> 
     assert "regime classification failed" in record.error_message
 
     # write_main_transaction must NOT have been called on DATA_STALE
-    assert (
-        write_main_call_count[0] == 0
-    ), f"write_main_transaction was called {write_main_call_count[0]} times, expected 0"
+    assert write_main_call_count[0] == 0, (
+        f"write_main_transaction was called {write_main_call_count[0]} times, expected 0"
+    )
 
     # daily_runs row MUST exist (day is closed)
     with sqlite3.connect(db) as conn:
@@ -768,9 +768,9 @@ def test_lifecycle_real_fold_9_at_2024_06_18(tmp_path: Path) -> None:
     )
 
     assert record.status == RunStatus.SUCCESS
-    assert (
-        record.model_fold_id_used == 9
-    ), f"Expected fold 9 for 2024-06-18, got fold {record.model_fold_id_used}"
+    assert record.model_fold_id_used == 9, (
+        f"Expected fold 9 for 2024-06-18, got fold {record.model_fold_id_used}"
+    )
 
     with sqlite3.connect(db) as conn:
         d = target.isoformat()
@@ -1007,9 +1007,9 @@ def test_rebalance_cadence_real_ohlcv_window(tmp_path: Path) -> None:
     )
 
     # Skip if window is shorter than expected
-    assert (
-        len(trading_days) >= 60
-    ), f"expected >= 60 trading days in window, got {len(trading_days)}"
+    assert len(trading_days) >= 60, (
+        f"expected >= 60 trading days in window, got {len(trading_days)}"
+    )
     trading_days = trading_days[:60]  # exactly 60
 
     for d in trading_days:
@@ -1039,9 +1039,9 @@ def test_rebalance_cadence_real_ohlcv_window(tmp_path: Path) -> None:
             }
         )
 
-    assert (
-        n_rebalances == 3
-    ), f"expected 3 rebalances over 60 trading days at freq=20, got {n_rebalances}: {rebalance_dates}"
+    assert n_rebalances == 3, (
+        f"expected 3 rebalances over 60 trading days at freq=20, got {n_rebalances}: {rebalance_dates}"
+    )
 
     # Verify: gap between consecutive rebalances is exactly 20 trading days
     import itertools
@@ -1049,9 +1049,9 @@ def test_rebalance_cadence_real_ohlcv_window(tmp_path: Path) -> None:
     parsed = [dt.date.fromisoformat(d) for d in rebalance_dates]
     for prev, curr in itertools.pairwise(parsed):
         gap_trading = sum(1 for d in trading_days if prev < d <= curr)
-        assert (
-            gap_trading == 20
-        ), f"gap from {prev} to {curr} = {gap_trading} trading days, expected 20"
+        assert gap_trading == 20, (
+            f"gap from {prev} to {curr} = {gap_trading} trading days, expected 20"
+        )
 
     store.close()
 
@@ -1130,9 +1130,9 @@ def test_count_trading_days_since_includes_data_stale(tmp_path: Path) -> None:
         )
     )
     count_with_holiday = _count_trading_days_since(store, as_of=holiday_date, since=weekdays[0])
-    assert (
-        count_with_holiday == 20
-    ), f"SKIPPED_HOLIDAY day must NOT count, expected 20 still, got {count_with_holiday}."
+    assert count_with_holiday == 20, (
+        f"SKIPPED_HOLIDAY day must NOT count, expected 20 still, got {count_with_holiday}."
+    )
 
     store.close()
 
@@ -1296,7 +1296,7 @@ def test_partial_universe_on_feature_date_raises_uncaught(tmp_path: Path) -> Non
     latest = store.get_latest_portfolio_state()
     assert latest is not None, "seeded portfolio_state should still exist"
     assert latest.date == seed_date, (
-        f"latest portfolio_state should still be the seed date {seed_date}, " f"got {latest.date}"
+        f"latest portfolio_state should still be the seed date {seed_date}, got {latest.date}"
     )
 
     store.close()

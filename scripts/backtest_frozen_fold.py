@@ -256,9 +256,9 @@ def main() -> None:
         f"  embargo end: {embargo_end}  |  backtest_start: {BACKTEST_START}"
         f"  (eligible: {embargo_end < BACKTEST_START})"
     )
-    assert (
-        embargo_end < BACKTEST_START
-    ), f"Fold 0 embargo end {embargo_end} is NOT before backtest_start {BACKTEST_START}"
+    assert embargo_end < BACKTEST_START, (
+        f"Fold 0 embargo end {embargo_end} is NOT before backtest_start {BACKTEST_START}"
+    )
 
     # ------------------------------------------------------------------
     # 2. Load benchmark histories from disk

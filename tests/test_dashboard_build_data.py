@@ -48,17 +48,11 @@ def benchmark_csvs(tmp_path: Path) -> tuple[Path, Path]:
     """Two minimal benchmark CSVs at the same shape as Phase 4 outputs."""
     nifty_csv = tmp_path / "nifty50_history.csv"
     nifty_csv.write_text(
-        "date,total_value\n"
-        "2022-07-04,1000000.0\n"
-        "2022-07-05,998452.83\n"
-        "2022-07-06,1009753.51\n"
+        "date,total_value\n2022-07-04,1000000.0\n2022-07-05,998452.83\n2022-07-06,1009753.51\n"
     )
     ew_csv = tmp_path / "ew_nifty49_history.csv"
     ew_csv.write_text(
-        "date,total_value\n"
-        "2022-07-04,998808.29\n"
-        "2022-07-05,997866.49\n"
-        "2022-07-06,1011300.73\n"
+        "date,total_value\n2022-07-04,998808.29\n2022-07-05,997866.49\n2022-07-06,1011300.73\n"
     )
     return nifty_csv, ew_csv
 
@@ -962,9 +956,9 @@ def test_default_benchmark_csv_paths_are_tracked_in_git_and_readable() -> None:
     # shape, so a future move to a wrong-but-tracked file still fails loudly.
     for path in (DEFAULT_NIFTY50_CSV, DEFAULT_EW_NIFTY49_CSV):
         first_line = (repo_root / path).read_text().splitlines()[0]
-        assert (
-            first_line == "date,total_value"
-        ), f"{path} header is {first_line!r}; expected 'date,total_value'"
+        assert first_line == "date,total_value", (
+            f"{path} header is {first_line!r}; expected 'date,total_value'"
+        )
 
 
 # ---------------------------------------------------------------------------

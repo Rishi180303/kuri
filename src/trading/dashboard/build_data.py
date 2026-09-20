@@ -155,7 +155,7 @@ def _build_todays_picks(
         }
         for pos in positions
     ]
-    basket.sort(key=lambda b: (b["rank_at_entry"] if b["rank_at_entry"] is not None else 1_000_000))
+    basket.sort(key=lambda b: b["rank_at_entry"] if b["rank_at_entry"] is not None else 1_000_000)
     return {
         "date": latest_state.date.isoformat(),
         "is_rebalance_day": is_rebalance_day,

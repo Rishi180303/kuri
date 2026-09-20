@@ -90,6 +90,6 @@ def assert_no_lookahead(
         diffs = a.with_columns(
             ((pl.col(col) - b[col]).abs() > 1e-9).fill_null(False).alias("_diff")
         ).filter(pl.col("_diff"))
-        assert (
-            diffs.is_empty()
-        ), f"lookahead detected in column `{col}` ({diffs.height} rows differ)"
+        assert diffs.is_empty(), (
+            f"lookahead detected in column `{col}` ({diffs.height} rows differ)"
+        )

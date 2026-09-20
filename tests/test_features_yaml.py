@@ -16,9 +16,9 @@ from trading.features.yaml_io import (
 
 def test_default_yaml_in_sync_with_code() -> None:
     """The shipped configs/features.yaml must always match code."""
-    assert (
-        validate_features_yaml_in_sync()
-    ), "configs/features.yaml drifted from code. Run `kuri features write-yaml` to regenerate."
+    assert validate_features_yaml_in_sync(), (
+        "configs/features.yaml drifted from code. Run `kuri features write-yaml` to regenerate."
+    )
 
 
 def test_render_includes_version_and_count() -> None:

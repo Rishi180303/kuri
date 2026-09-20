@@ -95,9 +95,9 @@ def test_calibration_perfect_calibration() -> None:
     buckets = calibration_buckets(np.array(y_true), np.array(y_proba), n_buckets=10)
     for b in buckets:
         if b.count > 0:
-            assert (
-                abs(b.mean_predicted - b.mean_actual) < 0.05
-            ), f"bucket {b.bucket}: pred={b.mean_predicted:.3f} actual={b.mean_actual:.3f}"
+            assert abs(b.mean_predicted - b.mean_actual) < 0.05, (
+                f"bucket {b.bucket}: pred={b.mean_predicted:.3f} actual={b.mean_actual:.3f}"
+            )
 
 
 def test_calibration_buckets_counts_sum_to_total() -> None:
