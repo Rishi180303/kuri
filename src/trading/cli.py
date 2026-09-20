@@ -67,7 +67,7 @@ from trading.features.yaml_io import (
 )
 from trading.labels import LabelStore, compute_labels, label_columns_for_horizon
 from trading.logging import configure_logging, get_logger
-from trading.papertrading.lifecycle import run_daily
+from trading.papertrading.lifecycle import run_daily, skip_placeholder_holiday
 from trading.papertrading.store import PaperTradingStore
 from trading.papertrading.types import RunSource
 from trading.pipelines.backfill import backfill_flow
@@ -968,7 +968,7 @@ def papertrading_run(
     ``run_daily`` returns early and the CLI prints the existing status.
 
     Exit codes:
-      0 - success or DATA_STALE (a daily_runs row was written)
+      0 - success, DATA_STALE or skipped_holiday (a daily_runs row was written)
       1 - unexpected failure (no daily_runs row written; safe to retry)
     """
     import datetime
@@ -994,27 +994,31 @@ def papertrading_run(
 
     try:
         universe_ohlcv = load_universe_ohlcv(start=datetime.date(2018, 1, 1), end=target)
-        feature_frame = load_training_data(
-            start=datetime.date(2021, 12, 1),
-            end=target,
-            horizons=(20,),
-            feature_version=2,
-            label_version=1,
-            drop_label_nulls=False,
-        )
-        router = FoldRouter.from_disk(Path("models/v1/lgbm"), embargo_days=5)
-        provider = StitchedPredictionsProvider(
-            fold_router=router, feature_frame=feature_frame, universe=universe
-        )
+        # NSE holiday: Yahoo serves zero-volume placeholder rows. Close the day
+        # as skipped_holiday before any model or feature work.
+        record = skip_placeholder_holiday(target, store, universe_ohlcv)
+        if record is None:
+            feature_frame = load_training_data(
+                start=datetime.date(2021, 12, 1),
+                end=target,
+                horizons=(20,),
+                feature_version=2,
+                label_version=1,
+                drop_label_nulls=False,
+            )
+            router = FoldRouter.from_disk(Path("models/v1/lgbm"), embargo_days=5)
+            provider = StitchedPredictionsProvider(
+                fold_router=router, feature_frame=feature_frame, universe=universe
+            )
 
-        record = run_daily(
-            target,
-            store,
-            provider,
-            universe_ohlcv,
-            feature_frame,
-            source=RunSource.LIVE,
-        )
+            record = run_daily(
+                target,
+                store,
+                provider,
+                universe_ohlcv,
+                feature_frame,
+                source=RunSource.LIVE,
+            )
     except Exception as exc:
         typer.echo(f"papertrading run failed: {exc}", err=True)
         store.close()

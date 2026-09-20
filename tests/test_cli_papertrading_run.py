@@ -251,6 +251,54 @@ def test_run_with_target_date(tmp_path: Path) -> None:
     assert rows[0][0] in (RunStatus.SUCCESS.value, RunStatus.DATA_STALE.value)
 
 
+def test_run_on_placeholder_holiday_records_skipped_holiday(tmp_path: Path) -> None:
+    """The live command must close an NSE holiday as skipped_holiday instead of
+    marking the book and counting the day toward the rebalance cadence."""
+    db_path = tmp_path / "state.db"
+    target = datetime.date(2024, 1, 3)
+    seed_date = datetime.date(2024, 1, 2)
+    _seed_initial_state(db_path, seed_date)
+
+    # What Yahoo serves on a holiday: a row per ticker, volume 0.
+    ohlcv = _make_synthetic_ohlcv(_TICKERS, datetime.date(2023, 12, 1), target).with_columns(
+        pl.when(pl.col("date") == target).then(0.0).otherwise(pl.col("volume")).alias("volume")
+    )
+    features = _make_synthetic_features(_TICKERS, datetime.date(2023, 12, 1), target)
+
+    runner = CliRunner()
+    with (
+        patch("trading.cli.load_training_data", return_value=features),
+        patch("trading.backtest.data.load_universe_ohlcv", return_value=ohlcv),
+        patch(
+            "trading.backtest.walk_forward_sim.FoldRouter.from_disk",
+            return_value=_FakeRouter(5),
+        ),
+        patch(
+            "trading.backtest.walk_forward_sim.StitchedPredictionsProvider",
+            return_value=_SyntheticProvider(_TICKERS),
+        ),
+        patch("trading.papertrading.lifecycle.load_index_ohlcv", return_value=_EMPTY_NSEI),
+    ):
+        result = runner.invoke(
+            app,
+            ["papertrading", "run", "--target-date", target.isoformat(), "--db-path", str(db_path)],
+        )
+
+    assert result.exit_code == 0, result.stdout
+    assert RunStatus.SKIPPED_HOLIDAY.value in result.stdout
+
+    conn = sqlite3.connect(db_path)
+    statuses = conn.execute(
+        "SELECT status FROM daily_runs WHERE run_date = ?", (target.isoformat(),)
+    ).fetchall()
+    state_rows = conn.execute(
+        "SELECT COUNT(*) FROM portfolio_state WHERE date = ?", (target.isoformat(),)
+    ).fetchone()
+    conn.close()
+    assert statuses == [(RunStatus.SKIPPED_HOLIDAY.value,)]
+    assert state_rows == (0,)
+
+
 # ---------------------------------------------------------------------------
 # 3. Idempotent: second invocation no-ops
 # ---------------------------------------------------------------------------
